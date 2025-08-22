@@ -285,6 +285,8 @@ class Plugin(indigo.PluginBase):
 
         old_on = getattr(orig_dev, "onState", None)
         new_on = getattr(new_dev, "onState", None)
+
+
         if old_on is not None or new_on is not None:
             if old_on != new_on:
                 self.logger.debug(f"Tracked device change: '{new_dev.name}' (id {new_dev.id}) onState {old_on} -> {new_on}")
@@ -304,6 +306,9 @@ class Plugin(indigo.PluginBase):
             if new_on is True:
                 if not (intervals and intervals[-1][1] is None):
                     intervals.append((now, None))
+                    # Record an ON event timestamp for counting
+                tracker.setdefault("on_events", []).append(now)
+                self.logger.debug(f"Recorded ON event for '{indigo.devices.get(timer_dev_id).name}' at {now}")
             else:
                 if intervals and intervals[-1][1] is None:
                     start, _ = intervals[-1]
@@ -333,9 +338,17 @@ class Plugin(indigo.PluginBase):
                             intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
                             seconds_yday = self._compute_on_seconds_between(intervals, yday_start, today_start)
                             minutes_yday = round(seconds_yday / 60.0, 1)
+
+                            # Compute yesterday's ON event count
+                            on_events = tracker.get("on_events", [])
+                            yday_count = sum(1 for t in on_events if yday_start <= t < today_start)
+
                             self.logger.info(
-                                f"Yesterday total for '{timer_dev.name}': {minutes_yday:.1f} min; Today starts at 0.0")
+                                f"Yesterday total for '{timer_dev.name}': {minutes_yday:.1f} min; "
+                                f"On events: {yday_count}; Today starts at 0.0"
+                            )
                         self._current_date = now.date()
+
                 except Exception as exc:
                     self.logger.exception(exc)
 
@@ -349,7 +362,8 @@ class Plugin(indigo.PluginBase):
 
                     # Prune old intervals
                     self._prune_intervals(intervals, now)
-
+                    # Prune old ON event timestamps (keep only yesterday/today)
+                    self._prune_on_events(tracker.setdefault("on_events", []), now)
                     # Refresh target metadata frequently
                     target_id = tracker.get("target_id")
                     target_dev = indigo.devices.get(target_id) if target_id is not None else None
@@ -420,11 +434,12 @@ class Plugin(indigo.PluginBase):
             )
         except Exception as exc:
             self.logger.exception(exc)
-
+        # In _register_tracker(), when constructing self.trackers[timer_dev.id] dict
         self.trackers[timer_dev.id] = {
             "target_id": target_id,
             "intervals": intervals,
             "offsets": offsets,
+            "on_events": [],  # track OFF->ON transition timestamps observed while running
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
 
@@ -453,6 +468,21 @@ class Plugin(indigo.PluginBase):
             timer_dev.updateStatesOnServer(kv)
         except Exception:
             pass
+
+    # Add this helper alongside _prune_intervals()
+    def _prune_on_events(self, events: List[datetime], now: datetime) -> None:
+        """
+        Keep only ON event timestamps from yesterday midnight forward, since we only
+        need to compute counts for 'yesterday' and 'today'.
+        """
+        try:
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            yday_start = today_start - timedelta(days=1)
+            cutoff = yday_start
+            if events:
+                events[:] = [t for t in events if t >= cutoff]
+        except Exception as exc:
+            self.logger.exception(exc)
 
     def _prune_intervals(self, intervals: List[Tuple[datetime, Optional[datetime]]], now: datetime) -> None:
         horizon = now - timedelta(seconds=RETENTION_SECONDS)
@@ -536,7 +566,12 @@ class Plugin(indigo.PluginBase):
         kv_list.append(
             {"key": "timeon_yesterday", "value": minutes_yday, "uiValue": f"{minutes_yday:.1f}", "decimalPlaces": 1})
         kv_list.append({"key": "timeon_yesterday_text", "value": self._format_duration_text(seconds_yday)})
+        on_events = tracker.get("on_events", [])
+        count_today = sum(1 for t in on_events if today_start <= t < now)
+        count_yday = sum(1 for t in on_events if yday_start <= t < today_start)
 
+        kv_list.append({"key": "oncount_today", "value": int(count_today), "uiValue": str(int(count_today))})
+        kv_list.append({"key": "oncount_yesterday", "value": int(count_yday), "uiValue": str(int(count_yday))})
         try:
             timer_dev.updateStatesOnServer(kv_list)
             self.logger.debug(

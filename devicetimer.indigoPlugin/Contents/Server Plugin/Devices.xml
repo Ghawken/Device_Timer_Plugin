@@ -139,7 +139,17 @@
     <TriggerLabel>On Time (3w, text)</TriggerLabel>
     <ControlPageLabel>On Time (3w, text)</ControlPageLabel>
 </State>
+            <State id="oncount_today">
+    <ValueType>Integer</ValueType>
+    <TriggerLabel>On Count (Today)</TriggerLabel>
+    <ControlPageLabel>On Count Today</ControlPageLabel>
+</State>
+<State id="oncount_yesterday">
+    <ValueType>Integer</ValueType>
+    <TriggerLabel>On Count (Yesterday)</TriggerLabel>
+    <ControlPageLabel>On Count Yesterday</ControlPageLabel>
+</State>
         </States>
-        <UiDisplayStateId>timeon_24hours</UiDisplayStateId>
+        <UiDisplayStateId>timeon_today_text</UiDisplayStateId>
     </Device>
 </Devices>
