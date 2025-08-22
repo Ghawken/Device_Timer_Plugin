@@ -152,12 +152,8 @@ class Plugin(indigo.PluginBase):
         self.trackers: Dict[int, Dict] = {}
         self.by_target: Dict[int, Set[int]] = {}
 
-        # Subscribe early so deviceUpdated fires
-        try:
-            indigo.devices.subscribeToChanges()
-            self.logger.debug("Subscribed to device changes in __init__")
-        except Exception as exc:
-            self.logger.exception(exc)
+
+        self.logger.info("{0:=^120}".format(" End Initializing Device Timer "))
 
     ########################################
     def startup(self) -> None:
