@@ -113,20 +113,21 @@ class Plugin(indigo.PluginBase):
             indigo.server.log(f"Failed to create IndigoLogHandler: {exc}", isError=True)
 
         # File handler (Logs/Plugins/<bundle-id>.log)
-        try:
-            logs_dir = path.join(indigo.server.getInstallFolderPath(), "Logs", "Plugins")
-            os.makedirs(logs_dir, exist_ok=True)
-            logfile = path.join(logs_dir, f"{plugin_id}.log")
-            self.plugin_file_handler = logging.handlers.RotatingFileHandler(logfile, maxBytes=2_000_000, backupCount=3)
-            pfmt = logging.Formatter(
-                "%(asctime)s.%(msecs)03d\t[%(levelname)8s] %(name)20s.%(funcName)-25s%(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
-            self.plugin_file_handler.setFormatter(pfmt)
-            self.plugin_file_handler.setLevel(self.fileloglevel)
-            self.logger.addHandler(self.plugin_file_handler)
-        except Exception as exc:
-            self.logger.exception(exc)
+        pfmt = logging.Formatter('%(asctime)s.%(msecs)03d\t[%(levelname)8s] %(name)20s.%(funcName)-25s%(msg)s',
+                                 datefmt='%Y-%m-%d %H:%M:%S')
+        self.plugin_file_handler.setFormatter(pfmt)
+
+        self.debug = self.pluginPrefs.get('showDebugInfo', False)
+        self.debug1 = self.pluginPrefs.get('debug1', False)
+        self.debug2 = self.pluginPrefs.get('debug2', False)
+        self.debug3 = self.pluginPrefs.get('debug3', False)
+        self.debug4 = self.pluginPrefs.get('debug4',False)
+        self.debug5 = self.pluginPrefs.get('debug5', False)
+        self.debug6 = self.pluginPrefs.get('debug6', False)
+        self.debug7 = self.pluginPrefs.get('debug7', False)
+        self.debug8 = self.pluginPrefs.get('debug8', False)
+        self.indigo_log_handler.setLevel(self.logLevel)
+        self.plugin_file_handler.setLevel(self.fileloglevel)
 
         # Convenience debug flags (optional fine-grained toggles)
         self.debug = bool(self.pluginPrefs.get("showDebugInfo", False))
@@ -152,12 +153,6 @@ class Plugin(indigo.PluginBase):
         self.trackers: Dict[int, Dict] = {}
         self.by_target: Dict[int, Set[int]] = {}
 
-        # Subscribe early so deviceUpdated fires
-        try:
-            indigo.devices.subscribeToChanges()
-            self.logger.debug("Subscribed to device changes in __init__")
-        except Exception as exc:
-            self.logger.exception(exc)
 
     ########################################
     def startup(self) -> None:
