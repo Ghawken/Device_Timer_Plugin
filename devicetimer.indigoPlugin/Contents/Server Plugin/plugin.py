@@ -310,7 +310,9 @@ class Plugin(indigo.PluginBase):
                     intervals.append((now, None))
                     # Record an ON event timestamp for counting
                 tracker.setdefault("on_events", []).append(now)
-                self.logger.debug(f"Recorded ON event for '{indigo.devices.get(timer_dev_id).name}' at {now}")
+                td = indigo.devices.get(timer_dev_id)
+                tname = td.name if td else f"id {timer_dev_id}"
+                self.logger.debug(f"Recorded ON event for '{tname}' at {now}")
             else:
                 if intervals and intervals[-1][1] is None:
                     start, _ = intervals[-1]
@@ -417,6 +419,7 @@ class Plugin(indigo.PluginBase):
                 "day_offsets": {"today": 0.0, "yesterday": 0.0},
                 "count_offsets": {"today": 0, "yesterday": 0},
                 "on_events": [],
+                "yesterday_locked_for_date": indigo.server.getTime().date(),
             }
             return
 
