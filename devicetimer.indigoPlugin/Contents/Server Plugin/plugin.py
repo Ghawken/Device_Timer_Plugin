@@ -250,7 +250,7 @@ class Plugin(indigo.PluginBase):
         new_on = getattr(new_dev, "onState", None)
         if old_on is not None or new_on is not None:
             if old_on != new_on:
-                self.logger.info(f"Tracked device change: '{new_dev.name}' (id {new_dev.id}) onState {old_on} -> {new_on}")
+                self.logger.debug(f"Tracked device change: '{new_dev.name}' (id {new_dev.id}) onState {old_on} -> {new_on}")
 
         # If device doesn't support on/off or no transition, stop here
         if (old_on is None and new_on is None) or (old_on == new_on):
