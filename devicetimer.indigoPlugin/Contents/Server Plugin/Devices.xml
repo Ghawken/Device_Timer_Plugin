@@ -74,6 +74,71 @@
                 <TriggerLabel>On Time (Last 3 Weeks)</TriggerLabel>
                 <ControlPageLabel>On Time (3w)</ControlPageLabel>
             </State>
+                    <State id="timeon_today">
+            <ValueType>Number</ValueType>
+            <TriggerLabel>On Time (Today, minutes)</TriggerLabel>
+            <ControlPageLabel>On Time Today (min)</ControlPageLabel>
+        </State>
+        <State id="timeon_yesterday">
+            <ValueType>Number</ValueType>
+            <TriggerLabel>On Time (Yesterday, minutes)</TriggerLabel>
+            <ControlPageLabel>On Time Yesterday (min)</ControlPageLabel>
+        </State>
+            <State id="timeon_today_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (Today, text)</TriggerLabel>
+    <ControlPageLabel>On Time Today (text)</ControlPageLabel>
+</State>
+<State id="timeon_yesterday_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (Yesterday, text)</TriggerLabel>
+    <ControlPageLabel>On Time Yesterday (text)</ControlPageLabel>
+</State>
+            <State id="timeon_24hours_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (24h, text)</TriggerLabel>
+    <ControlPageLabel>On Time (24h, text)</ControlPageLabel>
+</State>
+<State id="timeon_48hours_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (48h, text)</TriggerLabel>
+    <ControlPageLabel>On Time (48h, text)</ControlPageLabel>
+</State>
+<State id="timeon_72hours_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (72h, text)</TriggerLabel>
+    <ControlPageLabel>On Time (72h, text)</ControlPageLabel>
+</State>
+<State id="timeon_96hours_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (96h, text)</TriggerLabel>
+    <ControlPageLabel>On Time (96h, text)</ControlPageLabel>
+</State>
+<State id="timeon_5days_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (5d, text)</TriggerLabel>
+    <ControlPageLabel>On Time (5d, text)</ControlPageLabel>
+</State>
+<State id="timeon_6days_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (6d, text)</TriggerLabel>
+    <ControlPageLabel>On Time (6d, text)</ControlPageLabel>
+</State>
+<State id="timeon_1week_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (1w, text)</TriggerLabel>
+    <ControlPageLabel>On Time (1w, text)</ControlPageLabel>
+</State>
+<State id="timeon_2weeks_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (2w, text)</TriggerLabel>
+    <ControlPageLabel>On Time (2w, text)</ControlPageLabel>
+</State>
+<State id="timeon_3weeks_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>On Time (3w, text)</TriggerLabel>
+    <ControlPageLabel>On Time (3w, text)</ControlPageLabel>
+</State>
         </States>
         <UiDisplayStateId>timeon_24hours</UiDisplayStateId>
     </Device>

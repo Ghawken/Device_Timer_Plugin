@@ -204,6 +204,7 @@ class Plugin(indigo.PluginBase):
     def deviceStartComm(self, dev: indigo.Device) -> None:
         if dev.deviceTypeId == "deviceTimer":
             self._register_tracker(dev)
+            dev.stateListOrDisplayStateIdChanged()
             try:
                 dev.updateStateImageOnServer(indigo.kStateImageSel.TimerOn)
             except Exception:
@@ -213,6 +214,36 @@ class Plugin(indigo.PluginBase):
         if dev.deviceTypeId == "deviceTimer":
             self._unregister_tracker(dev)
 
+    # ADD
+    def _compute_on_seconds_between(
+            self,
+            intervals: List[Tuple[datetime, Optional[datetime]]],
+            start_ts: datetime,
+            end_ts: datetime
+    ) -> float:
+        total = 0.0
+        for s, e in intervals:
+            s0 = s
+            e0 = e or end_ts
+            if e0 <= start_ts or s0 >= end_ts:
+                continue
+            overlap_start = max(s0, start_ts)
+            overlap_end = min(e0, end_ts)
+            if overlap_end > overlap_start:
+                total += (overlap_end - overlap_start).total_seconds()
+        return total
+
+    # ADD
+    def _format_duration_text(self, total_seconds: float) -> str:
+        secs = int(round(total_seconds))
+        hours = secs // 3600
+        mins = (secs % 3600) // 60
+        parts = []
+        if hours > 0:
+            parts.append(f"{hours} hour" + ("s" if hours != 1 else ""))
+        if mins > 0 or hours == 0:
+            parts.append(f"{mins} min" + ("s" if mins != 1 else ""))
+        return " and ".join(parts)
     ########################################
     def all_devices(
         self,
@@ -384,7 +415,7 @@ class Plugin(indigo.PluginBase):
                     del self.by_target[tgt]
 
     def _reset_timer_states(self, timer_dev: indigo.Device) -> None:
-        kv = [{"key": key, "value": 0.0, "uiValue": "0.00", "decimalPlaces": 2} for key, _ in WINDOWS]
+        kv = [{"key": key, "value": 0.0, "uiValue": "0.0", "decimalPlaces": 1} for key, _ in WINDOWS]
         kv.extend([
             {"key": "target_device_id", "value": 0},
             {"key": "target_device_name", "value": "--"},
@@ -426,6 +457,7 @@ class Plugin(indigo.PluginBase):
         return total
 
     # CHANGE: replace _update_timer_states with offset-aware version
+    # REPLACE
     def _update_timer_states(
             self,
             timer_dev: indigo.Device,
@@ -433,27 +465,56 @@ class Plugin(indigo.PluginBase):
             now: datetime
     ) -> None:
         """
-        Recompute all states using current intervals plus startup offsets so values
-        don't reset on restart. Offsets are captured from the device's states at startup.
+        Publish rolling window states in minutes (1dp), their text variants,
+        and today/yesterday (midnight-anchored). Rolling windows still use
+        startup offsets to preserve displayed values across restart.
         """
         intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
-        offsets: Dict[str, float] = tracker.get("offsets", {})
+        offsets: Dict[str, float] = tracker.get("offsets", {})  # now expected to be minutes
+
         kv_list = []
+
+        # Rolling windows (minutes + text)
         for state_id, win_secs in WINDOWS:
             on_seconds = self._compute_on_seconds(intervals, now, win_secs)
-            hours_since_start = round(on_seconds / 3600.0, 2)
-            total_hours = round(hours_since_start + float(offsets.get(state_id, 0.0)), 2)
+            minutes_since_start = round(on_seconds / 60.0, 1)
+            total_minutes = round(minutes_since_start + float(offsets.get(state_id, 0.0)), 1)
+
+            # numeric minutes
             kv_list.append({
                 "key": state_id,
-                "value": total_hours,
-                "uiValue": f"{total_hours:.2f}",
-                "decimalPlaces": 2
+                "value": total_minutes,
+                "uiValue": f"{total_minutes:.1f}",
+                "decimalPlaces": 1
             })
+            # text (derive from minutes to seconds for wording)
+            kv_list.append({
+                "key": f"{state_id}_text",
+                "value": self._format_duration_text(total_minutes * 60.0)
+            })
+
+        # Today / Yesterday (minutes + text), based on local midnight anchors (no offsets)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yday_start = today_start - timedelta(days=1)
+
+        seconds_today = self._compute_on_seconds_between(intervals, today_start, now)
+        minutes_today = round(seconds_today / 60.0, 1)
+        kv_list.append(
+            {"key": "timeon_today", "value": minutes_today, "uiValue": f"{minutes_today:.1f}", "decimalPlaces": 1})
+        kv_list.append({"key": "timeon_today_text", "value": self._format_duration_text(seconds_today)})
+
+        seconds_yday = self._compute_on_seconds_between(intervals, yday_start, today_start)
+        minutes_yday = round(seconds_yday / 60.0, 1)
+        kv_list.append(
+            {"key": "timeon_yesterday", "value": minutes_yday, "uiValue": f"{minutes_yday:.1f}", "decimalPlaces": 1})
+        kv_list.append({"key": "timeon_yesterday_text", "value": self._format_duration_text(seconds_yday)})
+
         try:
             timer_dev.updateStatesOnServer(kv_list)
             self.logger.debug(
-                f"Updated timers for '{timer_dev.name}': " +
-                ", ".join([f"{kv['key']}={kv['uiValue']}" for kv in kv_list])
+                f"Updated timers (minutes) for '{timer_dev.name}': " +
+                ", ".join([f"{kv['key']}={kv.get('uiValue', kv.get('value'))}" for kv in kv_list if
+                           kv['key'].startswith('timeon_') and not kv['key'].endswith('_text')])
             )
         except Exception as exc:
             self.logger.exception(exc)
