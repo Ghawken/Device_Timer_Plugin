@@ -88,8 +88,6 @@ class Plugin(indigo.PluginBase):
 
         # --- Logging setup ---------------------------------------------------
         self.indigo_log_handler: Optional[IndigoLogHandler] = None
-        self.plugin_file_handler: Optional[logging.Handler] = None
-
         # Base logger level (collect everything; handlers filter)
         self.logger.setLevel(logging.DEBUG)
 
