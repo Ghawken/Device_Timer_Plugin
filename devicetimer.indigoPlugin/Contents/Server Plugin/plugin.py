@@ -363,7 +363,8 @@ class Plugin(indigo.PluginBase):
                             # Roll baselines: yesterday becomes finished day, reset today's baselines
                             tracker["day_offsets"] = {"today": 0.0, "yesterday": minutes_finished_day_total}
                             tracker["count_offsets"] = {"today": 0, "yesterday": yday_count_total}
-
+                             # Lock yesterday for the new day so we don't add interval-based 'since' again
+                            tracker["yesterday_locked_for_date"] = now.date()
                         self._current_date = now.date()
                 except Exception as exc:
                     self.logger.exception(exc)
@@ -491,12 +492,13 @@ class Plugin(indigo.PluginBase):
             self.logger.exception(exc)
 
         self.trackers[timer_dev.id] = {
-            "target_id": target_id,
+            "target_id": target_id,  # or None in the no-target branch
             "intervals": intervals,
-            "offsets": offsets,  # minutes
-            "day_offsets": day_offsets,  # minutes
-            "count_offsets": count_offsets,  # integers
-            "on_events": [],  # timestamps since startup
+            "offsets": offsets,
+            "day_offsets": day_offsets,
+            "count_offsets": count_offsets,
+            "on_events": [],
+            "yesterday_locked_for_date": indigo.server.getTime().date(),  # lock for the current date
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
         self.logger.debug(f"Registered '{timer_dev.name}' -> target id {target_id} (intervals: {len(intervals)})")
@@ -612,7 +614,12 @@ class Plugin(indigo.PluginBase):
 
         seconds_yday = self._compute_on_seconds_between(intervals, yday_start, today_start)
         minutes_yday = round(seconds_yday / 60.0, 1)
-        minutes_yday_total = round(minutes_yday + float(day_offsets.get("yesterday", 0.0)), 1)
+        y_locked_date = tracker.get("yesterday_locked_for_date")
+        if y_locked_date == now.date():
+            minutes_yday_total = float(day_offsets.get("yesterday", 0.0))
+        else:
+            minutes_yday_total = round(minutes_yday + float(day_offsets.get("yesterday", 0.0)), 1)
+
         kv_list.append({"key": "timeon_yesterday", "value": minutes_yday_total, "uiValue": f"{minutes_yday_total:.1f}",
                         "decimalPlaces": 1})
         kv_list.append({"key": "timeon_yesterday_text", "value": self._format_duration_text(minutes_yday_total * 60.0)})
@@ -621,10 +628,16 @@ class Plugin(indigo.PluginBase):
         on_events = tracker.get("on_events", [])
         count_today = sum(1 for t in on_events if today_start <= t < now)
         count_yday = sum(1 for t in on_events if yday_start <= t < today_start)
+
         count_today_total = int(count_today + int(count_offsets.get("today", 0)))
-        count_yday_total = int(count_yday + int(count_offsets.get("yesterday", 0)))
-        kv_list.append({"key": "oncount_today", "value": count_today_total, "uiValue": str(count_today_total)})
+
+        yday_count_since = sum(1 for t in on_events if yday_start <= t < today_start)
+        if y_locked_date == now.date():
+            count_yday_total = int(count_offsets.get("yesterday", 0))
+        else:
+            count_yday_total = int(yday_count_since + int(count_offsets.get("yesterday", 0)))
         kv_list.append({"key": "oncount_yesterday", "value": count_yday_total, "uiValue": str(count_yday_total)})
+        kv_list.append({"key": "oncount_today", "value": count_today_total, "uiValue": str(count_today_total)})
 
         try:
             timer_dev.updateStatesOnServer(kv_list)
