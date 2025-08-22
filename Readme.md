@@ -1,5 +1,7 @@
 # Device Timer Plugin
 
+![](https://github.com/Ghawken/Device_Timer_Plugin/blob/main/devicetimer.indigoPlugin/Resources/icon.png?raw=true)
+
 Device Timer tracks how long a selected Indigo device has been ON across multiple rolling windows, and also provides day-based totals and counts of ON-events. It exposes both numeric minute totals and human-friendly text strings for easy use in Control Pages and triggers.
 
 ## What it does
