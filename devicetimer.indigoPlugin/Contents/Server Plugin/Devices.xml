@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<!-- Bare-bones Device Timer plugin device definition -->
+<Devices>
+    <Device type="custom" id="deviceTimer">
+        <Name>Device Timer</Name>
+        <ConfigUI>
+            <Field id="targetDeviceId" type="menu">
+                <Label>Device to track:</Label>
+                <List class="self" method="all_devices" dynamicReload="true"/>
+            </Field>
+            <Field id="note" type="label" fontColor="darkgray" fontSize="small">
+                <Label>Tracks how many hours the selected device has been ON over rolling windows.</Label>
+            </Field>
+        </ConfigUI>
+        <States>
+                        <!-- Target metadata states -->
+            <State id="target_device_id">
+                <ValueType>Integer</ValueType>
+                <TriggerLabel>Target Device ID</TriggerLabel>
+                <ControlPageLabel>Target Device ID</ControlPageLabel>
+            </State>
+            <State id="target_device_name">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Target Device Name</TriggerLabel>
+                <ControlPageLabel>Target Device Name</ControlPageLabel>
+            </State>
+            <State id="target_on_state">
+                <ValueType>Boolean</ValueType>
+                <TriggerLabel>Target On State</TriggerLabel>
+                <ControlPageLabel>Target On State</ControlPageLabel>
+            </State>
+            <State id="timeon_24hours">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 24 Hours)</TriggerLabel>
+                <ControlPageLabel>On Time (24h)</ControlPageLabel>
+            </State>
+            <State id="timeon_48hours">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 48 Hours)</TriggerLabel>
+                <ControlPageLabel>On Time (48h)</ControlPageLabel>
+            </State>
+            <State id="timeon_72hours">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 72 Hours)</TriggerLabel>
+                <ControlPageLabel>On Time (72h)</ControlPageLabel>
+            </State>
+            <State id="timeon_96hours">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 96 Hours)</TriggerLabel>
+                <ControlPageLabel>On Time (96h)</ControlPageLabel>
+            </State>
+            <State id="timeon_5days">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 5 Days)</TriggerLabel>
+                <ControlPageLabel>On Time (5d)</ControlPageLabel>
+            </State>
+            <State id="timeon_6days">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 6 Days)</TriggerLabel>
+                <ControlPageLabel>On Time (6d)</ControlPageLabel>
+            </State>
+            <State id="timeon_1week">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 1 Week)</TriggerLabel>
+                <ControlPageLabel>On Time (1w)</ControlPageLabel>
+            </State>
+            <State id="timeon_2weeks">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 2 Weeks)</TriggerLabel>
+                <ControlPageLabel>On Time (2w)</ControlPageLabel>
+            </State>
+            <State id="timeon_3weeks">
+                <ValueType>Number</ValueType>
+                <TriggerLabel>On Time (Last 3 Weeks)</TriggerLabel>
+                <ControlPageLabel>On Time (3w)</ControlPageLabel>
+            </State>
+        </States>
+        <UiDisplayStateId>timeon_24hours</UiDisplayStateId>
+    </Device>
+</Devices>
