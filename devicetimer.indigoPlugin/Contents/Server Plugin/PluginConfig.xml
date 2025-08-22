@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<PluginConfig>
+    <SupportURL>https://wiki.indigodomo.com/</SupportURL>
+
+    <Field id="about" type="label" fontColor="darkgray" fontSize="small">
+        <Label>Device Timer tracks how many hours the selected device has been ON over rolling windows. Configure logging below.</Label>
+    </Field>
+
+    <Field id="showDebugInfo" type="checkbox" defaultValue="false">
+        <Label>Enable debug logging</Label>
+    </Field>
+
+    <Field id="showDebugLevel" type="menu" defaultValue="20">
+        <Label>Event Log level</Label>
+        <List>
+            <Option value="10">DEBUG</Option>
+            <Option value="20">INFO</Option>
+            <Option value="30">WARNING</Option>
+            <Option value="40">ERROR</Option>
+        </List>
+    </Field>
+
+    <Field id="showDebugFileLevel" type="menu" defaultValue="10">
+        <Label>File log level</Label>
+        <List>
+            <Option value="10">DEBUG</Option>
+            <Option value="20">INFO</Option>
+            <Option value="30">WARNING</Option>
+            <Option value="40">ERROR</Option>
+        </List>
+    </Field>
+</PluginConfig>

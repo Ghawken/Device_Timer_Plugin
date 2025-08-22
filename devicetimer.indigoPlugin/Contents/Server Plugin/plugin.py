@@ -1,14 +1,61 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
 ####################
-# Copyright (c) 2025
-# Bare-bones Device Timer plugin
+# Device Timer plugin
 try:
-    # The indigo package is available when the plugin is started by Indigo
     import indigo
 except ImportError:
     pass
 
+import os
+import sys
+import platform
+import traceback
+import logging
+import logging.handlers
+from os import path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Set
+
+################################################################################
+# Indigo Event Log handler that routes Python logging to Indigo's Event Log
+################################################################################
+class IndigoLogHandler(logging.Handler):
+    def __init__(self, display_name, level=logging.NOTSET):
+        super().__init__(level)
+        self.displayName = display_name
+
+    def emit(self, record):
+        """not used by this class; must be called independently by indigo"""
+        logmessage = ""
+        is_error = False
+        levelno = getattr(record, "levelno", logging.INFO)
+        try:
+            if self.level <= levelno:
+                is_exception = record.exc_info is not None
+                if levelno == 5 or levelno == logging.DEBUG:
+                    logmessage = "({}:{}:{}): {}".format(path.basename(record.pathname), record.funcName, record.lineno, record.getMessage())
+                elif levelno == logging.INFO:
+                    logmessage = record.getMessage()
+                elif levelno == logging.WARNING:
+                    logmessage = record.getMessage()
+                elif levelno == logging.ERROR:
+                    logmessage = "({}: Function: {}  line: {}):    Error :  Message : {}".format(path.basename(record.pathname), record.funcName, record.lineno, record.getMessage())
+                    is_error = True
+
+                if is_exception:
+                    logmessage = "({}: Function: {}  line: {}):    Exception :  Message : {}".format(path.basename(record.pathname), record.funcName, record.lineno, record.getMessage())
+                    indigo.server.log(message=logmessage, type=self.displayName, isError=is_error, level=levelno)
+                    etype, value, tb = record.exc_info
+                    tb_string = "".join(traceback.format_tb(tb))
+                    indigo.server.log(f"Traceback:\n{tb_string}", type=self.displayName, isError=is_error, level=levelno)
+                    indigo.server.log(f"Error in plugin execution:\n\n{traceback.format_exc(30)}", type=self.displayName, isError=is_error, level=levelno)
+                    indigo.server.log(f"\nExc_info: {record.exc_info} \nExc_Text: {record.exc_text} \nStack_info: {record.stack_info}", type=self.displayName, isError=is_error, level=levelno)
+                    return
+
+                indigo.server.log(message=logmessage, type=self.displayName, isError=is_error, level=levelno)
+        except Exception as ex:
+            indigo.server.log(f"Error in Logging: {ex}", type=self.displayName, isError=True, level=logging.ERROR)
 
 # Rolling windows in seconds mapped to state ids
 WINDOWS: List[Tuple[str, int]] = [
@@ -23,8 +70,8 @@ WINDOWS: List[Tuple[str, int]] = [
     ("timeon_3weeks", 21 * 24 * 3600),
 ]
 
-# Retention horizon to prune intervals (longest window)
 RETENTION_SECONDS: int = WINDOWS[-1][1]
+REFRESH_INTERVAL_SECS: int = 15
 
 
 class Plugin(indigo.PluginBase):
@@ -38,25 +85,88 @@ class Plugin(indigo.PluginBase):
         **kwargs
     ) -> None:
         super().__init__(plugin_id, plugin_display_name, plugin_version, plugin_prefs, **kwargs)
-        self.debug: bool = True
 
+        # --- Logging setup ---------------------------------------------------
+        self.indigo_log_handler: Optional[IndigoLogHandler] = None
+        self.plugin_file_handler: Optional[logging.Handler] = None
+
+        # Base logger level (collect everything; handlers filter)
+        self.logger.setLevel(logging.DEBUG)
+
+        # Read prefs (with safe defaults)
+        try:
+            self.logLevel = int(self.pluginPrefs.get("showDebugLevel", logging.INFO))
+            self.fileloglevel = int(self.pluginPrefs.get("showDebugFileLevel", logging.DEBUG))
+        except Exception:
+            self.logLevel = logging.INFO
+            self.fileloglevel = logging.DEBUG
+
+        # Indigo Event Log handler
+        try:
+            if self.indigo_log_handler:
+                self.logger.removeHandler(self.indigo_log_handler)
+            self.indigo_log_handler = IndigoLogHandler(plugin_display_name, self.logLevel)
+            self.indigo_log_handler.setLevel(self.logLevel)
+            self.indigo_log_handler.setFormatter(logging.Formatter("%(message)s"))
+            self.logger.addHandler(self.indigo_log_handler)
+        except Exception as exc:
+            indigo.server.log(f"Failed to create IndigoLogHandler: {exc}", isError=True)
+
+        # File handler (Logs/Plugins/<bundle-id>.log)
+        try:
+            logs_dir = path.join(indigo.server.getInstallFolderPath(), "Logs", "Plugins")
+            os.makedirs(logs_dir, exist_ok=True)
+            logfile = path.join(logs_dir, f"{plugin_id}.log")
+            self.plugin_file_handler = logging.handlers.RotatingFileHandler(logfile, maxBytes=2_000_000, backupCount=3)
+            pfmt = logging.Formatter(
+                "%(asctime)s.%(msecs)03d\t[%(levelname)8s] %(name)20s.%(funcName)-25s%(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            self.plugin_file_handler.setFormatter(pfmt)
+            self.plugin_file_handler.setLevel(self.fileloglevel)
+            self.logger.addHandler(self.plugin_file_handler)
+        except Exception as exc:
+            self.logger.exception(exc)
+
+        # Convenience debug flags (optional fine-grained toggles)
+        self.debug = bool(self.pluginPrefs.get("showDebugInfo", False))
+
+        # Session header
+        self.logger.info("")
+        self.logger.info("{0:=^120}".format(" Initializing Device Timer "))
+        self.logger.info(f"{'Plugin name:':<28} {plugin_display_name}")
+        self.logger.info(f"{'Plugin version:':<28} {plugin_version}")
+        self.logger.info(f"{'Plugin ID:':<28} {plugin_id}")
+        self.logger.info(f"{'Indigo version:':<28} {indigo.server.version}")
+        self.logger.info(f"{'Silicon version:':<28} {platform.machine()}")
+        self.logger.info(f"{'Python version:':<28} {sys.version.replace(os.linesep, ' ')}")
+        self.logger.info(f"{'Python Directory:':<28} {sys.prefix.replace(os.linesep, ' ')}")
+
+        # --- Plugin runtime state -------------------------------------------
         # Trackers keyed by this plugin's timer device ID
         # tracker structure: {
         #   "target_id": int,
-        #   "intervals": List[Tuple[datetime, Optional[datetime]]],  # [ (start, end|None) ... ]
+        #   "intervals": List[Tuple[datetime, Optional[datetime]]],
+        #   "preserve": bool,  # preserve states after restart until first on/off transition
         # }
         self.trackers: Dict[int, Dict] = {}
-
-        # Reverse index: target device ID -> set(timer device IDs)
         self.by_target: Dict[int, Set[int]] = {}
+
+        # Subscribe early so deviceUpdated fires
+        try:
+            indigo.devices.subscribeToChanges()
+            self.logger.debug("Subscribed to device changes in __init__")
+        except Exception as exc:
+            self.logger.exception(exc)
 
     ########################################
     def startup(self) -> None:
         self.logger.debug("startup called -- subscribing to device changes")
-        # Subscribe to changes for ALL Indigo devices (use sparingly)
-        indigo.devices.subscribeToChanges()
+        try:
+            indigo.devices.subscribeToChanges()
+        except Exception as exc:
+            self.logger.exception(exc)
 
-        # Initialize trackers for any existing timer devices
         for dev in indigo.devices.iter("self"):
             if dev.deviceTypeId == "deviceTimer":
                 self._register_tracker(dev)
@@ -65,23 +175,43 @@ class Plugin(indigo.PluginBase):
         self.logger.debug("shutdown called")
 
     ########################################
+    def closedPluginConfigUi(self, values_dict: indigo.Dict, user_cancelled: bool) -> None:
+        if user_cancelled:
+            return
+        # Persist and apply log settings
+        try:
+            self.pluginPrefs["showDebugInfo"] = bool(values_dict.get("showDebugInfo", False))
+            self.pluginPrefs["showDebugLevel"] = int(values_dict.get("showDebugLevel", logging.INFO))
+            self.pluginPrefs["showDebugFileLevel"] = int(values_dict.get("showDebugFileLevel", logging.DEBUG))
+            indigo.server.savePluginPrefs()
+
+            self.debug = bool(self.pluginPrefs.get("showDebugInfo", False))
+            self.logLevel = int(self.pluginPrefs.get("showDebugLevel", logging.INFO))
+            self.fileloglevel = int(self.pluginPrefs.get("showDebugFileLevel", logging.DEBUG))
+
+            if self.indigo_log_handler:
+                self.indigo_log_handler.setLevel(self.logLevel)
+            if self.plugin_file_handler:
+                self.plugin_file_handler.setLevel(self.fileloglevel)
+
+            self.logger.info(f"Applied logging prefs: EventLog={logging.getLevelName(self.logLevel)}, File={logging.getLevelName(self.fileloglevel)}, Debug={'on' if self.debug else 'off'}")
+        except Exception as exc:
+            self.logger.exception(exc)
+
+    ########################################
     def deviceStartComm(self, dev: indigo.Device) -> None:
-        # Called when a plugin device starts comms or is (re)configured
         if dev.deviceTypeId == "deviceTimer":
             self._register_tracker(dev)
-            # Optional: set a timer icon
             try:
                 dev.updateStateImageOnServer(indigo.kStateImageSel.TimerOn)
             except Exception:
                 pass
 
     def deviceStopComm(self, dev: indigo.Device) -> None:
-        # Clean up tracker mappings when timer device stops
         if dev.deviceTypeId == "deviceTimer":
             self._unregister_tracker(dev)
 
     ########################################
-    # Dynamic list for ConfigUI
     def all_devices(
         self,
         filter_str: str = "",
@@ -89,10 +219,6 @@ class Plugin(indigo.PluginBase):
         type_id: str = "",
         target_id: int = 0
     ) -> list:
-        """
-        Builds a popup list of all Indigo devices (native and plugin).
-        Returns list of tuples (id_str, name).
-        """
         return_list = []
         try:
             for dev_id in indigo.devices.keys():
@@ -100,28 +226,33 @@ class Plugin(indigo.PluginBase):
                 return_list.append((str(dev_id), name))
         except Exception as exc:
             self.logger.exception(exc)
-        # Sort by device name for convenience
         return sorted(return_list, key=lambda t: t[1].lower())
 
     ########################################
-    # Subscriptions: react to any device changes
     def deviceUpdated(self, orig_dev: indigo.Device, new_dev: indigo.Device) -> None:
         super().deviceUpdated(orig_dev, new_dev)
 
-        # If this device is being tracked, update intervals when onState changes
         timer_ids = self.by_target.get(new_dev.id, set())
         if not timer_ids:
             return
 
+        self.logger.debug(f"deviceUpdated: target '{new_dev.name}' ({new_dev.id}) has {len(timer_ids)} timer(s) tracking it")
+
+        # Always refresh metadata on any update
+        for timer_dev_id in list(timer_ids):
+            timer_dev = indigo.devices.get(timer_dev_id)
+            if timer_dev:
+                self._update_target_meta_states(timer_dev, new_dev)
+
         old_on = getattr(orig_dev, "onState", None)
         new_on = getattr(new_dev, "onState", None)
+        if old_on is not None or new_on is not None:
+            if old_on != new_on:
+                self.logger.info(f"Tracked device change: '{new_dev.name}' (id {new_dev.id}) onState {old_on} -> {new_on}")
 
-        # If device doesn't support on/off, nothing to do
-        if old_on is None and new_on is None:
+        # If device doesn't support on/off or no transition, stop here
+        if (old_on is None and new_on is None) or (old_on == new_on):
             return
-
-        if old_on == new_on:
-            return  # No change in on/off
 
         now = indigo.server.getTime()
         for timer_dev_id in list(timer_ids):
@@ -131,30 +262,25 @@ class Plugin(indigo.PluginBase):
 
             intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
 
+            # Exit preserve mode on first transition
+            if tracker.get("preserve", False):
+                tracker["preserve"] = False
+                self.logger.debug(f"Preserve mode off for timer device id {timer_dev_id} (first transition seen)")
+
             if new_on is True:
-                # Transition to ON: start a new open interval
-                if intervals and intervals[-1][1] is None:
-                    # already open; ignore
-                    pass
-                else:
+                if not (intervals and intervals[-1][1] is None):
                     intervals.append((now, None))
             else:
-                # Transition to OFF: close the open interval if present
                 if intervals and intervals[-1][1] is None:
                     start, _ = intervals[-1]
                     intervals[-1] = (start, now)
 
-            # After event, update the computed states immediately
             timer_dev = indigo.devices.get(timer_dev_id)
-            if timer_dev:
+            if timer_dev and not tracker.get("preserve", False):
                 self._update_timer_states(timer_dev, intervals, now)
 
     ########################################
     def runConcurrentThread(self) -> None:
-        """
-        Periodically recompute rolling window totals so states remain fresh,
-        even if a device stays ON for long periods.
-        """
         try:
             while True:
                 now = indigo.server.getTime()
@@ -162,50 +288,57 @@ class Plugin(indigo.PluginBase):
                     timer_dev = indigo.devices.get(timer_dev_id)
                     if not timer_dev:
                         continue
+
                     intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
 
-                    # Prune old intervals outside retention horizon to bound memory
                     self._prune_intervals(intervals, now)
 
-                    # Refresh states
-                    self._update_timer_states(timer_dev, intervals, now)
+                    target_id = tracker.get("target_id")
+                    target_dev = indigo.devices.get(target_id) if target_id is not None else None
+                    if target_dev:
+                        self._update_target_meta_states(timer_dev, target_dev)
 
-                # Update once per minute
-                self.sleep(60)
+                        current_on = getattr(target_dev, "onState", None)
+                        if current_on and not (intervals and intervals[-1][1] is None):
+                            intervals.append((now, None))
+                            self.logger.debug(f"Opened interval for timer '{timer_dev.name}' due to target ON")
+
+                    if not tracker.get("preserve", False):
+                        self._update_timer_states(timer_dev, intervals, now)
+                    else:
+                        self.logger.debug(f"Preserving existing timer states for '{timer_dev.name}' (awaiting first on/off change)")
+
+                self.sleep(REFRESH_INTERVAL_SECS)
         except self.StopThread:
             pass
 
     ########################################
     # Helpers
     def _register_tracker(self, timer_dev: indigo.Device) -> None:
-        """Register or update a tracker for a timer device based on its config."""
-        # Remove existing mapping if reconfiguring
         self._unregister_tracker(timer_dev)
 
         props = timer_dev.pluginProps or {}
         target_str = props.get("targetDeviceId", "")
         if not target_str:
             self.logger.warning(f"'{timer_dev.name}' has no target device selected.")
-            # Initialize states to 0
-            self._reset_timer_states(timer_dev)
+            self._update_target_meta_states(timer_dev, None)
+            self.trackers[timer_dev.id] = {"target_id": None, "intervals": [], "preserve": True}
             return
 
         try:
             target_id = int(target_str)
         except ValueError:
             self.logger.error(f"'{timer_dev.name}' invalid targetDeviceId: {target_str}")
-            self._reset_timer_states(timer_dev)
+            self._update_target_meta_states(timer_dev, None)
+            self.trackers[timer_dev.id] = {"target_id": None, "intervals": [], "preserve": True}
             return
 
-        # Create tracker structure
         now = indigo.server.getTime()
         intervals: List[Tuple[datetime, Optional[datetime]]] = []
-
         target_dev = indigo.devices.get(target_id)
         if target_dev:
             current_on = getattr(target_dev, "onState", None)
             if current_on:
-                # Start an open interval from now
                 intervals.append((now, None))
         else:
             self.logger.warning(f"'{timer_dev.name}' target device id {target_id} not found.")
@@ -213,17 +346,14 @@ class Plugin(indigo.PluginBase):
         self.trackers[timer_dev.id] = {
             "target_id": target_id,
             "intervals": intervals,
+            "preserve": True,
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
 
-        if self.debug:
-            self.logger.debug(f"Registered '{timer_dev.name}' -> target id {target_id}")
-
-        # Initialize states
-        self._update_timer_states(timer_dev, intervals, now)
+        self.logger.debug(f"Registered '{timer_dev.name}' -> target id {target_id} (preserve mode on)")
+        self._update_target_meta_states(timer_dev, target_dev)
 
     def _unregister_tracker(self, timer_dev: indigo.Device) -> None:
-        """Remove tracker and reverse index entries for this timer device."""
         existing = self.trackers.pop(timer_dev.id, None)
         if existing:
             tgt = existing.get("target_id")
@@ -232,23 +362,13 @@ class Plugin(indigo.PluginBase):
                 if not self.by_target[tgt]:
                     del self.by_target[tgt]
 
-    def _reset_timer_states(self, timer_dev: indigo.Device) -> None:
-        kv = [{"key": key, "value": 0.0} for key, _ in WINDOWS]
-        try:
-            timer_dev.updateStatesOnServer(kv)
-        except Exception:
-            pass
-
     def _prune_intervals(self, intervals: List[Tuple[datetime, Optional[datetime]]], now: datetime) -> None:
-        """Keep only intervals that may overlap the retention window."""
         horizon = now - timedelta(seconds=RETENTION_SECONDS)
         keep: List[Tuple[datetime, Optional[datetime]]] = []
         for start, end in intervals:
-            # If interval ends before horizon, drop it
             effective_end = end or now
             if effective_end <= horizon:
                 continue
-            # Keep (possibly with original start; clipping is handled in computation)
             keep.append((start, end))
         if len(keep) != len(intervals):
             intervals[:] = keep
@@ -259,7 +379,6 @@ class Plugin(indigo.PluginBase):
         now: datetime,
         window_seconds: int
     ) -> float:
-        """Compute total ON seconds overlapping [now - window, now]."""
         window_start = now - timedelta(seconds=window_seconds)
         total = 0.0
         for start, end in intervals:
@@ -279,19 +398,43 @@ class Plugin(indigo.PluginBase):
         intervals: List[Tuple[datetime, Optional[datetime]]],
         now: datetime
     ) -> None:
-        """Recompute all states for a timer device."""
         kv_list = []
         for state_id, win_secs in WINDOWS:
             on_seconds = self._compute_on_seconds(intervals, now, win_secs)
             hours = round(on_seconds / 3600.0, 2)
-            kv_list.append({"key": state_id, "value": hours})
+            kv_list.append({
+                "key": state_id,
+                "value": hours,
+                "uiValue": f"{hours:.2f}",
+                "decimalPlaces": 2
+            })
         try:
             timer_dev.updateStatesOnServer(kv_list)
+            self.logger.debug(f"Updated timers for '{timer_dev.name}': " + ", ".join([f"{kv['key']}={kv['uiValue']}" for kv in kv_list]))
+        except Exception as exc:
+            self.logger.exception(exc)
+
+    def _update_target_meta_states(self, timer_dev: indigo.Device, target_dev: Optional[indigo.Device]) -> None:
+        if target_dev:
+            on_val = getattr(target_dev, "onState", False)
+            kv = [
+                {"key": "target_device_id", "value": int(target_dev.id)},
+                {"key": "target_device_name", "value": target_dev.name},
+                {"key": "target_on_state", "value": bool(on_val) if on_val is not None else False},
+            ]
+        else:
+            kv = [
+                {"key": "target_device_id", "value": 0},
+                {"key": "target_device_name", "value": "--"},
+                {"key": "target_on_state", "value": False},
+            ]
+        try:
+            timer_dev.updateStatesOnServer(kv)
+            self.logger.debug(f"Meta updated for '{timer_dev.name}': " + ", ".join([f"{d['key']}={d['value']}" for d in kv]))
         except Exception as exc:
             self.logger.exception(exc)
 
     ########################################
-    # Validation (optional, keep simple)
     def validateDeviceConfigUi(
         self,
         values_dict: indigo.Dict,
