@@ -85,7 +85,13 @@ class Plugin(indigo.PluginBase):
         **kwargs
     ) -> None:
         super().__init__(plugin_id, plugin_display_name, plugin_version, plugin_prefs, **kwargs)
+        # Track current local date so we can detect midnight rollovers
 
+        try:
+            self._current_date = indigo.server.getTime().date()
+            self.logger.debug(f"Current date initialized to: {self._current_date}")
+        except Exception:
+            self._current_date = None
         # --- Logging setup ---------------------------------------------------
         self.logger.removeHandler(self.indigo_log_handler)
 
@@ -312,6 +318,28 @@ class Plugin(indigo.PluginBase):
         try:
             while True:
                 now = indigo.server.getTime()
+                # Midnight rollover detection and logging
+                try:
+                    if getattr(self, "_current_date", None) is None:
+                        self._current_date = now.date()
+                    elif now.date() != self._current_date:
+                        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                        yday_start = today_start - timedelta(days=1)
+                        self.logger.info(f"Midnight rollover: {self._current_date} -> {now.date()}")
+                        for timer_dev_id, tracker in list(self.trackers.items()):
+                            timer_dev = indigo.devices.get(timer_dev_id)
+                            if not timer_dev:
+                                continue
+                            intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
+                            seconds_yday = self._compute_on_seconds_between(intervals, yday_start, today_start)
+                            minutes_yday = round(seconds_yday / 60.0, 1)
+                            self.logger.info(
+                                f"Yesterday total for '{timer_dev.name}': {minutes_yday:.1f} min; Today starts at 0.0")
+                        self._current_date = now.date()
+                except Exception as exc:
+                    self.logger.exception(exc)
+
+
                 for timer_dev_id, tracker in list(self.trackers.items()):
                     timer_dev = indigo.devices.get(timer_dev_id)
                     if not timer_dev:
