@@ -278,7 +278,7 @@ class Plugin(indigo.PluginBase):
 
             timer_dev = indigo.devices.get(timer_dev_id)
             if timer_dev:
-                self._update_timer_states(timer_dev, tracker, now)
+                self._update_timer_states(timer_dev, intervals, now)
 
     ########################################
     def runConcurrentThread(self) -> None:
@@ -308,7 +308,7 @@ class Plugin(indigo.PluginBase):
                             self.logger.debug(f"Opened interval for timer '{timer_dev.name}' due to target ON")
 
                     # Keep timers live
-                    self._update_timer_states(timer_dev, tracker, now)
+                    self._update_timer_states(timer_dev, intervals, now)
 
                 self.sleep(REFRESH_INTERVAL_SECS)
         except self.StopThread:
@@ -348,22 +348,9 @@ class Plugin(indigo.PluginBase):
         else:
             self.logger.warning(f"'{timer_dev.name}' target device id {target_id} not found.")
 
-        # Capture current displayed hours as offsets so we don't reset on restart
-        offsets: Dict[str, float] = {}
-        try:
-            for state_id, _ in WINDOWS:
-                v = timer_dev.states.get(state_id, 0)
-                try:
-                    offsets[state_id] = float(v)
-                except Exception:
-                    offsets[state_id] = 0.0
-        except Exception as exc:
-            self.logger.exception(exc)
-
         self.trackers[timer_dev.id] = {
             "target_id": target_id,
             "intervals": intervals,
-            "offsets": offsets,
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
 
@@ -423,29 +410,28 @@ class Plugin(indigo.PluginBase):
                 total += (overlap_end - overlap_start).total_seconds()
         return total
 
+    # Replace the whole _update_timer_states function with this interval-only version:
     def _update_timer_states(
-        self,
-        timer_dev: indigo.Device,
-        tracker: Dict,
-        now: datetime
+            self,
+            timer_dev: indigo.Device,
+            intervals: List[Tuple[datetime, Optional[datetime]]],
+            now: datetime
     ) -> None:
-        """Recompute all states using current intervals plus startup offsets so values don't reset on restart."""
-        intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
-        offsets: Dict[str, float] = tracker.get("offsets", {})
+        """Recompute all states purely from intervals (no offsets), ensuring rolling windows decay correctly."""
         kv_list = []
         for state_id, win_secs in WINDOWS:
             on_seconds = self._compute_on_seconds(intervals, now, win_secs)
-            hours_since_start = round(on_seconds / 3600.0, 2)
-            total_hours = round(hours_since_start + float(offsets.get(state_id, 0.0)), 2)
+            hours = round(on_seconds / 3600.0, 2)
             kv_list.append({
                 "key": state_id,
-                "value": total_hours,
-                "uiValue": f"{total_hours:.2f}",
+                "value": hours,
+                "uiValue": f"{hours:.2f}",
                 "decimalPlaces": 2
             })
         try:
             timer_dev.updateStatesOnServer(kv_list)
-            self.logger.debug(f"Updated timers for '{timer_dev.name}': " + ", ".join([f"{kv['key']}={kv['uiValue']}" for kv in kv_list]))
+            self.logger.debug(f"Updated timers for '{timer_dev.name}': " + ", ".join(
+                [f"{kv['key']}={kv['uiValue']}" for kv in kv_list]))
         except Exception as exc:
             self.logger.exception(exc)
 
