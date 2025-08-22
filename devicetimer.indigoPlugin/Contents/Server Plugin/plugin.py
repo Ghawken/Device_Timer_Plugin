@@ -93,7 +93,9 @@ class Plugin(indigo.PluginBase):
         except Exception:
             self._current_date = None
         # --- Logging setup ---------------------------------------------------
-        self.logger.removeHandler(self.indigo_log_handler)
+        # AFTER (safe)
+        if hasattr(self, "indigo_log_handler") and self.indigo_log_handler:
+            self.logger.removeHandler(self.indigo_log_handler)
 
 
         # Base logger level (collect everything; handlers filter)
@@ -319,10 +321,14 @@ class Plugin(indigo.PluginBase):
                 self._update_timer_states(timer_dev, tracker, now)
 
     ########################################
+    # Function: runConcurrentThread (midnight block only, around L190-L245)
+    # - Log final yesterday totals and roll baselines so that 'yesterday' remains correct post-rollover
+    #   and 'today' restarts at 0. Also keep oncount baselines.
     def runConcurrentThread(self) -> None:
         try:
             while True:
                 now = indigo.server.getTime()
+
                 # Midnight rollover detection and logging
                 try:
                     if getattr(self, "_current_date", None) is None:
@@ -336,22 +342,31 @@ class Plugin(indigo.PluginBase):
                             if not timer_dev:
                                 continue
                             intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
-                            seconds_yday = self._compute_on_seconds_between(intervals, yday_start, today_start)
-                            minutes_yday = round(seconds_yday / 60.0, 1)
 
-                            # Compute yesterday's ON event count
+                            # Finished day totals (minutes) = interval sum for yday + baseline 'today'
+                            seconds_finished_day = self._compute_on_seconds_between(intervals, yday_start, today_start)
+                            minutes_finished_day_since = round(seconds_finished_day / 60.0, 1)
+                            minutes_finished_day_total = round(
+                                minutes_finished_day_since + float(tracker.get("day_offsets", {}).get("today", 0.0)), 1)
+
+                            # Finished day ON event counts = observed in yday + baseline 'today'
                             on_events = tracker.get("on_events", [])
-                            yday_count = sum(1 for t in on_events if yday_start <= t < today_start)
+                            yday_count_since = sum(1 for t in on_events if yday_start <= t < today_start)
+                            yday_count_total = int(
+                                yday_count_since + int(tracker.get("count_offsets", {}).get("today", 0)))
 
                             self.logger.info(
-                                f"Yesterday total for '{timer_dev.name}': {minutes_yday:.1f} min; "
-                                f"On events: {yday_count}; Today starts at 0.0"
+                                f"Yesterday total for '{timer_dev.name}': {minutes_finished_day_total:.1f} min; "
+                                f"On events: {yday_count_total}; Today starts at 0.0"
                             )
-                        self._current_date = now.date()
 
+                            # Roll baselines: yesterday becomes finished day, reset today's baselines
+                            tracker["day_offsets"] = {"today": 0.0, "yesterday": minutes_finished_day_total}
+                            tracker["count_offsets"] = {"today": 0, "yesterday": yday_count_total}
+
+                        self._current_date = now.date()
                 except Exception as exc:
                     self.logger.exception(exc)
-
 
                 for timer_dev_id, tracker in list(self.trackers.items()):
                     timer_dev = indigo.devices.get(timer_dev_id)
@@ -364,13 +379,12 @@ class Plugin(indigo.PluginBase):
                     self._prune_intervals(intervals, now)
                     # Prune old ON event timestamps (keep only yesterday/today)
                     self._prune_on_events(tracker.setdefault("on_events", []), now)
+
                     # Refresh target metadata frequently
                     target_id = tracker.get("target_id")
                     target_dev = indigo.devices.get(target_id) if target_id is not None else None
                     if target_dev:
                         self._update_target_meta_states(timer_dev, target_dev)
-
-                        # Ensure we have an open interval if target is currently ON (start immediately on restart)
                         current_on = getattr(target_dev, "onState", None)
                         if current_on and not (intervals and intervals[-1][1] is None):
                             intervals.append((now, None))
@@ -385,7 +399,8 @@ class Plugin(indigo.PluginBase):
 
     ########################################
     # Helpers
-    # CHANGE: in _register_tracker(...) capture baseline offsets from existing states
+    # Function: _register_tracker (around L300-L370)
+    # - Read current device states for today/yesterday minutes and counts into baselines at startup.
     def _register_tracker(self, timer_dev: indigo.Device) -> None:
         self._unregister_tracker(timer_dev)
 
@@ -393,9 +408,15 @@ class Plugin(indigo.PluginBase):
         target_str = props.get("targetDeviceId", "")
         if not target_str:
             self.logger.warning(f"'{timer_dev.name}' has no target device selected.")
-            # Leave existing timer states untouched; just set meta defaults
             self._update_target_meta_states(timer_dev, None)
-            self.trackers[timer_dev.id] = {"target_id": None, "intervals": [], "offsets": {}}
+            self.trackers[timer_dev.id] = {
+                "target_id": None,
+                "intervals": [],
+                "offsets": {},
+                "day_offsets": {"today": 0.0, "yesterday": 0.0},
+                "count_offsets": {"today": 0, "yesterday": 0},
+                "on_events": [],
+            }
             return
 
         try:
@@ -403,7 +424,14 @@ class Plugin(indigo.PluginBase):
         except ValueError:
             self.logger.error(f"'{timer_dev.name}' invalid targetDeviceId: {target_str}")
             self._update_target_meta_states(timer_dev, None)
-            self.trackers[timer_dev.id] = {"target_id": None, "intervals": [], "offsets": {}}
+            self.trackers[timer_dev.id] = {
+                "target_id": None,
+                "intervals": [],
+                "offsets": {},
+                "day_offsets": {"today": 0.0, "yesterday": 0.0},
+                "count_offsets": {"today": 0, "yesterday": 0},
+                "on_events": [],
+            }
             return
 
         now = indigo.server.getTime()
@@ -413,13 +441,12 @@ class Plugin(indigo.PluginBase):
         if target_dev:
             current_on = getattr(target_dev, "onState", None)
             if current_on:
-                # Start an open interval from now (do not wait for a change event)
                 intervals.append((now, None))
                 self.logger.debug(f"Opened interval at startup for '{timer_dev.name}' (target ON)")
         else:
             self.logger.warning(f"'{timer_dev.name}' target device id {target_id} not found.")
 
-        # Capture current displayed hours as offsets so we don't reset on restart
+        # Baselines for rolling windows (minutes)
         offsets: Dict[str, float] = {}
         try:
             for state_id, _ in WINDOWS:
@@ -429,23 +456,50 @@ class Plugin(indigo.PluginBase):
                 except Exception:
                     offsets[state_id] = 0.0
             self.logger.debug(
-                f"Captured baseline offsets for '{timer_dev.name}': " +
-                ", ".join([f"{k}={offsets[k]:.2f}" for k, _ in WINDOWS])
+                f"Captured rolling offsets for '{timer_dev.name}': " +
+                ", ".join([f"{k}={offsets[k]:.1f}" for k, _ in WINDOWS])
             )
         except Exception as exc:
             self.logger.exception(exc)
-        # In _register_tracker(), when constructing self.trackers[timer_dev.id] dict
+
+        # Baselines for day-bounded minutes (today/yesterday)
+        day_offsets = {"today": 0.0, "yesterday": 0.0}
+        try:
+            t_today = timer_dev.states.get("timeon_today", 0)
+            t_yday = timer_dev.states.get("timeon_yesterday", 0)
+            day_offsets["today"] = float(t_today) if t_today is not None else 0.0
+            day_offsets["yesterday"] = float(t_yday) if t_yday is not None else 0.0
+            self.logger.debug(
+                f"Captured day offsets for '{timer_dev.name}': today={day_offsets['today']:.1f} min, "
+                f"yesterday={day_offsets['yesterday']:.1f} min"
+            )
+        except Exception as exc:
+            self.logger.exception(exc)
+
+        # Baselines for on-event counts (today/yesterday)
+        count_offsets = {"today": 0, "yesterday": 0}
+        try:
+            c_today = timer_dev.states.get("oncount_today", 0)
+            c_yday = timer_dev.states.get("oncount_yesterday", 0)
+            count_offsets["today"] = int(c_today) if c_today is not None else 0
+            count_offsets["yesterday"] = int(c_yday) if c_yday is not None else 0
+            self.logger.debug(
+                f"Captured count offsets for '{timer_dev.name}': today={count_offsets['today']}, "
+                f"yesterday={count_offsets['yesterday']}"
+            )
+        except Exception as exc:
+            self.logger.exception(exc)
+
         self.trackers[timer_dev.id] = {
             "target_id": target_id,
             "intervals": intervals,
-            "offsets": offsets,
-            "on_events": [],  # track OFF->ON transition timestamps observed while running
+            "offsets": offsets,  # minutes
+            "day_offsets": day_offsets,  # minutes
+            "count_offsets": count_offsets,  # integers
+            "on_events": [],  # timestamps since startup
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
-
         self.logger.debug(f"Registered '{timer_dev.name}' -> target id {target_id} (intervals: {len(intervals)})")
-
-        # Initialize metadata immediately (do NOT write timer states here to preserve values on restart)
         self._update_target_meta_states(timer_dev, target_dev)
 
     def _unregister_tracker(self, timer_dev: indigo.Device) -> None:
@@ -516,6 +570,8 @@ class Plugin(indigo.PluginBase):
 
     # CHANGE: replace _update_timer_states with offset-aware version
     # REPLACE
+    # Function: _update_timer_states (around L520-L610)
+    # - Add baselines to today/yesterday minutes and counts.
     def _update_timer_states(
             self,
             timer_dev: indigo.Device,
@@ -524,11 +580,13 @@ class Plugin(indigo.PluginBase):
     ) -> None:
         """
         Publish rolling window states in minutes (1dp), their text variants,
-        and today/yesterday (midnight-anchored). Rolling windows still use
-        startup offsets to preserve displayed values across restart.
+        and today/yesterday (midnight-anchored). Rolling windows use startup
+        offsets; day totals and counts use their own startup baselines.
         """
         intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
-        offsets: Dict[str, float] = tracker.get("offsets", {})  # now expected to be minutes
+        offsets: Dict[str, float] = tracker.get("offsets", {})
+        day_offsets: Dict[str, float] = tracker.get("day_offsets", {"today": 0.0, "yesterday": 0.0})
+        count_offsets: Dict[str, int] = tracker.get("count_offsets", {"today": 0, "yesterday": 0})
 
         kv_list = []
 
@@ -537,41 +595,37 @@ class Plugin(indigo.PluginBase):
             on_seconds = self._compute_on_seconds(intervals, now, win_secs)
             minutes_since_start = round(on_seconds / 60.0, 1)
             total_minutes = round(minutes_since_start + float(offsets.get(state_id, 0.0)), 1)
+            kv_list.append(
+                {"key": state_id, "value": total_minutes, "uiValue": f"{total_minutes:.1f}", "decimalPlaces": 1})
+            kv_list.append({"key": f"{state_id}_text", "value": self._format_duration_text(total_minutes * 60.0)})
 
-            # numeric minutes
-            kv_list.append({
-                "key": state_id,
-                "value": total_minutes,
-                "uiValue": f"{total_minutes:.1f}",
-                "decimalPlaces": 1
-            })
-            # text (derive from minutes to seconds for wording)
-            kv_list.append({
-                "key": f"{state_id}_text",
-                "value": self._format_duration_text(total_minutes * 60.0)
-            })
-
-        # Today / Yesterday (minutes + text), based on local midnight anchors (no offsets)
+        # Day-bounded totals
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         yday_start = today_start - timedelta(days=1)
 
         seconds_today = self._compute_on_seconds_between(intervals, today_start, now)
         minutes_today = round(seconds_today / 60.0, 1)
-        kv_list.append(
-            {"key": "timeon_today", "value": minutes_today, "uiValue": f"{minutes_today:.1f}", "decimalPlaces": 1})
-        kv_list.append({"key": "timeon_today_text", "value": self._format_duration_text(seconds_today)})
+        minutes_today_total = round(minutes_today + float(day_offsets.get("today", 0.0)), 1)
+        kv_list.append({"key": "timeon_today", "value": minutes_today_total, "uiValue": f"{minutes_today_total:.1f}",
+                        "decimalPlaces": 1})
+        kv_list.append({"key": "timeon_today_text", "value": self._format_duration_text(minutes_today_total * 60.0)})
 
         seconds_yday = self._compute_on_seconds_between(intervals, yday_start, today_start)
         minutes_yday = round(seconds_yday / 60.0, 1)
-        kv_list.append(
-            {"key": "timeon_yesterday", "value": minutes_yday, "uiValue": f"{minutes_yday:.1f}", "decimalPlaces": 1})
-        kv_list.append({"key": "timeon_yesterday_text", "value": self._format_duration_text(seconds_yday)})
+        minutes_yday_total = round(minutes_yday + float(day_offsets.get("yesterday", 0.0)), 1)
+        kv_list.append({"key": "timeon_yesterday", "value": minutes_yday_total, "uiValue": f"{minutes_yday_total:.1f}",
+                        "decimalPlaces": 1})
+        kv_list.append({"key": "timeon_yesterday_text", "value": self._format_duration_text(minutes_yday_total * 60.0)})
+
+        # On-event counts
         on_events = tracker.get("on_events", [])
         count_today = sum(1 for t in on_events if today_start <= t < now)
         count_yday = sum(1 for t in on_events if yday_start <= t < today_start)
+        count_today_total = int(count_today + int(count_offsets.get("today", 0)))
+        count_yday_total = int(count_yday + int(count_offsets.get("yesterday", 0)))
+        kv_list.append({"key": "oncount_today", "value": count_today_total, "uiValue": str(count_today_total)})
+        kv_list.append({"key": "oncount_yesterday", "value": count_yday_total, "uiValue": str(count_yday_total)})
 
-        kv_list.append({"key": "oncount_today", "value": int(count_today), "uiValue": str(int(count_today))})
-        kv_list.append({"key": "oncount_yesterday", "value": int(count_yday), "uiValue": str(int(count_yday))})
         try:
             timer_dev.updateStatesOnServer(kv_list)
             self.logger.debug(
