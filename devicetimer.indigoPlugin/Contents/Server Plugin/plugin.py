@@ -179,7 +179,9 @@ class Plugin(indigo.PluginBase):
         self.logger.debug("shutdown called")
 
     ########################################
-    def closedPluginConfigUi(self, values_dict: indigo.Dict, user_cancelled: bool) -> None:
+    def closedPrefsConfigUi(self, values_dict: indigo.Dict, user_cancelled: bool) -> None:
+
+        self.logger.debug(f"closedPluginConfigUi called with values_dict: {values_dict} and user_cancelled: {user_cancelled}")
         if user_cancelled:
             return
         # Persist and apply log settings
@@ -189,20 +191,29 @@ class Plugin(indigo.PluginBase):
             self.pluginPrefs["showDebugFileLevel"] = int(values_dict.get("showDebugFileLevel", logging.DEBUG))
             indigo.server.savePluginPrefs()
 
-            self.debug = bool(self.pluginPrefs.get("showDebugInfo", False))
-            self.logLevel = int(self.pluginPrefs.get("showDebugLevel", logging.INFO))
-            self.fileloglevel = int(self.pluginPrefs.get("showDebugFileLevel", logging.DEBUG))
+            self.debug = bool(values_dict.get("showDebugInfo", False))
+            self.logLevel = int(values_dict.get("showDebugLevel", logging.INFO))
+            self.fileloglevel = int(values_dict.get("showDebugFileLevel", logging.DEBUG))
 
-            # Update handler levels; remove/add if necessary
-            if self.indigo_log_handler:
-                self.logger.removeHandler(self.indigo_log_handler)
-            self.indigo_log_handler = IndigoLogHandler(self.pluginDisplayName, self.logLevel)
+            self.logLevel = int(values_dict.get("showDebugLevel", '5'))
+            self.fileloglevel = int(values_dict.get("showDebugFileLevel", '5'))
+            self.debug1 = values_dict.get('debug1', False)
+            self.debug2 = values_dict.get('debug2', False)
+            self.debug3 = values_dict.get('debug3', False)
+            self.debug4 = values_dict.get('debug4', False)
+            self.debug5 = values_dict.get('debug5', False)
+            self.debug6 = values_dict.get('debug6', False)
+            self.debug7 = values_dict.get('debug7', False)
+            self.debug8 = values_dict.get('debug8', False)
+            self.debug9 = values_dict.get('debug9', False)
+
             self.indigo_log_handler.setLevel(self.logLevel)
-            self.indigo_log_handler.setFormatter(logging.Formatter("%(message)s"))
-            self.logger.addHandler(self.indigo_log_handler)
+            self.plugin_file_handler.setLevel(self.fileloglevel)
 
-            if self.plugin_file_handler:
-                self.plugin_file_handler.setLevel(self.fileloglevel)
+            self.logger.debug(u"logLevel = " + str(self.logLevel))
+            self.logger.debug(u"User prefs saved.")
+            self.logger.debug(u"Debugging on (Level: {0})".format(self.logLevel))
+
 
             self.logger.info(f"Applied logging prefs: EventLog={logging.getLevelName(self.logLevel)}, File={logging.getLevelName(self.fileloglevel)}, Debug={'on' if self.debug else 'off'}")
         except Exception as exc:
