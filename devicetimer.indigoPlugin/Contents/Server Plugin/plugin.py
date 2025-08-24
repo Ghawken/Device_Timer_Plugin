@@ -626,6 +626,13 @@ class Plugin(indigo.PluginBase):
                         "decimalPlaces": 1})
         kv_list.append({"key": "timeon_today_text", "value": self._format_duration_text(minutes_today_total * 60.0)})
 
+        # Today OFF (derived from elapsed day - on)
+        elapsed_today_minutes = round((now - today_start).total_seconds() / 60.0, 1)
+        off_today_minutes = max(0.0, round(elapsed_today_minutes - minutes_today_total, 1))
+        kv_list.append({"key": "timeoff_today", "value": off_today_minutes, "uiValue": f"{off_today_minutes:.1f}",
+                        "decimalPlaces": 1})
+        kv_list.append({"key": "timeoff_today_text", "value": self._format_duration_text(off_today_minutes * 60.0)})
+        # Yesterday ON (minutes + text)
         seconds_yday = self._compute_on_seconds_between(intervals, yday_start, today_start)
         minutes_yday = round(seconds_yday / 60.0, 1)
         y_locked_date = tracker.get("yesterday_locked_for_date")
@@ -637,6 +644,13 @@ class Plugin(indigo.PluginBase):
         kv_list.append({"key": "timeon_yesterday", "value": minutes_yday_total, "uiValue": f"{minutes_yday_total:.1f}",
                         "decimalPlaces": 1})
         kv_list.append({"key": "timeon_yesterday_text", "value": self._format_duration_text(minutes_yday_total * 60.0)})
+
+        # Yesterday OFF (24h - on)
+        full_day_minutes = 24 * 60.0
+        off_yday_minutes = max(0.0, round(full_day_minutes - minutes_yday_total, 1))
+        kv_list.append({"key": "timeoff_yesterday", "value": off_yday_minutes, "uiValue": f"{off_yday_minutes:.1f}",
+                        "decimalPlaces": 1})
+        kv_list.append({"key": "timeoff_yesterday_text", "value": self._format_duration_text(off_yday_minutes * 60.0)})
 
         # On-event counts
         on_events = tracker.get("on_events", [])

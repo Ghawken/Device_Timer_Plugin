@@ -149,6 +149,26 @@
     <TriggerLabel>On Count (Yesterday)</TriggerLabel>
     <ControlPageLabel>On Count Yesterday</ControlPageLabel>
 </State>
+<State id="timeoff_today">
+    <ValueType>Number</ValueType>
+    <TriggerLabel>Off Time (Today, minutes)</TriggerLabel>
+    <ControlPageLabel>Off Time Today (min)</ControlPageLabel>
+</State>
+<State id="timeoff_yesterday">
+    <ValueType>Number</ValueType>
+    <TriggerLabel>Off Time (Yesterday, minutes)</TriggerLabel>
+    <ControlPageLabel>Off Time Yesterday (min)</ControlPageLabel>
+</State>
+<State id="timeoff_today_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>Off Time (Today, text)</TriggerLabel>
+    <ControlPageLabel>Off Time Today (text)</ControlPageLabel>
+</State>
+<State id="timeoff_yesterday_text">
+    <ValueType>String</ValueType>
+    <TriggerLabel>Off Time (Yesterday, text)</TriggerLabel>
+    <ControlPageLabel>Off Time Yesterday (text)</ControlPageLabel>
+</State>
         </States>
         <UiDisplayStateId>timeon_today_text</UiDisplayStateId>
     </Device>
