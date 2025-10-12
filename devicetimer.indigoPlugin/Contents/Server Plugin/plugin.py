@@ -263,6 +263,50 @@ class Plugin(indigo.PluginBase):
         if mins > 0 or hours == 0:
             parts.append(f"{mins} min" + ("s" if mins != 1 else ""))
         return " and ".join(parts)
+
+    def _get_power_info(self, target_dev: Optional[indigo.Device]) -> Tuple[str, Optional[float], Optional[float]]:
+        """
+        Returns (using_power_state, current_power_watts, accum_energy_kwh)
+        using_power_state: "True", "False", or "Unknown"
+        """
+        if not target_dev:
+            return ("Unknown", None, None)
+        
+        # Check if device supports energy metering
+        try:
+            supports_energy = target_dev.globalProps.get("com.perceptiveautomation.indigoplugin.zwave", {}).get("SupportsEnergyMeter", False)
+            supports_cur_power = target_dev.globalProps.get("com.perceptiveautomation.indigoplugin.zwave", {}).get("SupportsEnergyMeterCurPower", False)
+        except Exception:
+            supports_energy = False
+            supports_cur_power = False
+        
+        if not (supports_energy and supports_cur_power):
+            return ("Unknown", None, None)
+        
+        # Get current power level
+        try:
+            cur_energy_level = target_dev.states.get("curEnergyLevel", None)
+            if cur_energy_level is None:
+                return ("Unknown", None, None)
+            cur_power = float(cur_energy_level)
+        except Exception:
+            return ("Unknown", None, None)
+        
+        # Get accumulated energy
+        try:
+            accum_energy = target_dev.states.get("accumEnergyTotal", None)
+            if accum_energy is not None:
+                accum_energy = float(accum_energy)
+        except Exception:
+            accum_energy = None
+        
+        # Determine using_power state
+        if cur_power > 1.0:
+            using_power = "True"
+        else:
+            using_power = "False"
+        
+        return (using_power, cur_power, accum_energy)
     ########################################
     def all_devices(
         self,
@@ -294,7 +338,10 @@ class Plugin(indigo.PluginBase):
         for timer_dev_id in list(timer_ids):
             timer_dev = indigo.devices.get(timer_dev_id)
             if timer_dev:
+                tracker = self.trackers.get(timer_dev_id)
                 self._update_target_meta_states(timer_dev, new_dev)
+                if tracker:
+                    self._update_power_states(timer_dev, tracker, new_dev, now)
 
         old_on = getattr(orig_dev, "onState", None)
         new_on = getattr(new_dev, "onState", None)
@@ -399,10 +446,14 @@ class Plugin(indigo.PluginBase):
                     target_dev = indigo.devices.get(target_id) if target_id is not None else None
                     if target_dev:
                         self._update_target_meta_states(timer_dev, target_dev)
+                        self._update_power_states(timer_dev, tracker, target_dev, now)
                         current_on = getattr(target_dev, "onState", None)
                         if current_on and not (intervals and intervals[-1][1] is None):
                             intervals.append((now, None))
                             self.logger.debug(f"Opened interval for timer '{timer_dev.name}' due to target ON")
+
+                    # Prune old energy snapshots
+                    self._prune_energy_snapshots(tracker.setdefault("energy_snapshots", []), now)
 
                     # Keep timers live
                     self._update_timer_states(timer_dev, tracker, now)
@@ -513,6 +564,7 @@ class Plugin(indigo.PluginBase):
             "count_offsets": count_offsets,
             "on_events": [],
             "yesterday_locked_for_date": indigo.server.getTime().date(),  # lock for the current date
+            "energy_snapshots": [],  # List of (datetime, accumEnergyTotal) tuples
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
         self.logger.debug(f"Registered '{timer_dev.name}' -> target id {target_id} (intervals: {len(intervals)})")
@@ -553,6 +605,48 @@ class Plugin(indigo.PluginBase):
                 events[:] = [t for t in events if t >= cutoff]
         except Exception as exc:
             self.logger.exception(exc)
+
+    def _prune_energy_snapshots(self, snapshots: List[Tuple[datetime, float]], now: datetime) -> None:
+        """Keep only energy snapshots from the last 48 hours."""
+        try:
+            cutoff = now - timedelta(hours=48)
+            if snapshots:
+                snapshots[:] = [(t, e) for t, e in snapshots if t >= cutoff]
+        except Exception as exc:
+            self.logger.exception(exc)
+
+    def _calculate_power_used(self, snapshots: List[Tuple[datetime, float]], current_energy: Optional[float], now: datetime, hours: int) -> Optional[float]:
+        """
+        Calculate power used over the last N hours.
+        Returns energy used in kWh, or None if insufficient data.
+        """
+        if current_energy is None:
+            return None
+        
+        cutoff_time = now - timedelta(hours=hours)
+        
+        # Find the snapshot closest to but before the cutoff time
+        past_snapshot = None
+        for ts, energy in snapshots:
+            if ts <= cutoff_time:
+                past_snapshot = (ts, energy)
+            elif ts > cutoff_time and past_snapshot is None:
+                # We have a snapshot after cutoff but none before
+                # Use this as approximation
+                past_snapshot = (ts, energy)
+                break
+        
+        if past_snapshot is None:
+            return None
+        
+        _, past_energy = past_snapshot
+        energy_used = current_energy - past_energy
+        
+        # Handle counter reset (energy went down)
+        if energy_used < 0:
+            return None
+        
+        return round(energy_used, 3)
 
     def _prune_intervals(self, intervals: List[Tuple[datetime, Optional[datetime]]], now: datetime) -> None:
         horizon = now - timedelta(seconds=RETENTION_SECONDS)
@@ -694,6 +788,42 @@ class Plugin(indigo.PluginBase):
         try:
             timer_dev.updateStatesOnServer(kv)
             self.logger.debug(f"Meta updated for '{timer_dev.name}': " + ", ".join([f"{d['key']}={d['value']}" for d in kv]))
+        except Exception as exc:
+            self.logger.exception(exc)
+
+    def _update_power_states(self, timer_dev: indigo.Device, tracker: Dict, target_dev: Optional[indigo.Device], now: datetime) -> None:
+        """Update power usage and energy consumption states."""
+        using_power, cur_power, accum_energy = self._get_power_info(target_dev)
+        
+        kv = [{"key": "using_power", "value": using_power}]
+        
+        # Store energy snapshot if we have valid data
+        if accum_energy is not None:
+            snapshots = tracker.setdefault("energy_snapshots", [])
+            # Only add snapshot if it's been at least 60 seconds since last one
+            if not snapshots or (now - snapshots[-1][0]).total_seconds() >= 60:
+                snapshots.append((now, accum_energy))
+            
+            # Calculate power used over 24h and 48h
+            power_24h = self._calculate_power_used(snapshots, accum_energy, now, 24)
+            power_48h = self._calculate_power_used(snapshots, accum_energy, now, 48)
+            
+            if power_24h is not None:
+                kv.append({"key": "powerused_24hours", "value": power_24h, "uiValue": f"{power_24h:.3f}", "decimalPlaces": 3})
+            else:
+                kv.append({"key": "powerused_24hours", "value": 0.0, "uiValue": "0.000", "decimalPlaces": 3})
+            
+            if power_48h is not None:
+                kv.append({"key": "powerused_48hours", "value": power_48h, "uiValue": f"{power_48h:.3f}", "decimalPlaces": 3})
+            else:
+                kv.append({"key": "powerused_48hours", "value": 0.0, "uiValue": "0.000", "decimalPlaces": 3})
+        else:
+            kv.append({"key": "powerused_24hours", "value": 0.0, "uiValue": "0.000", "decimalPlaces": 3})
+            kv.append({"key": "powerused_48hours", "value": 0.0, "uiValue": "0.000", "decimalPlaces": 3})
+        
+        try:
+            timer_dev.updateStatesOnServer(kv)
+            self.logger.debug(f"Power states updated for '{timer_dev.name}': using_power={using_power}")
         except Exception as exc:
             self.logger.exception(exc)
 
