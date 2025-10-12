@@ -170,7 +170,7 @@
     <ControlPageLabel>Off Time Yesterday (text)</ControlPageLabel>
 </State>
 <State id="using_power">
-    <ValueType>String</ValueType>
+    <ValueType>Boolean</ValueType>
     <TriggerLabel>Using Power</TriggerLabel>
     <ControlPageLabel>Using Power</ControlPageLabel>
 </State>

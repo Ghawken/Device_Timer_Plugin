@@ -302,9 +302,9 @@ class Plugin(indigo.PluginBase):
         
         # Determine using_power state
         if cur_power > 1.0:
-            using_power = "True"
+            using_power = True
         else:
-            using_power = "False"
+            using_power = False
         
         return (using_power, cur_power, accum_energy)
     ########################################
