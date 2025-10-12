@@ -327,7 +327,7 @@ class Plugin(indigo.PluginBase):
     ########################################
     def deviceUpdated(self, orig_dev: indigo.Device, new_dev: indigo.Device) -> None:
         super().deviceUpdated(orig_dev, new_dev)
-
+        now = indigo.server.getTime()
         timer_ids = self.by_target.get(new_dev.id, set())
         if not timer_ids:
             return
