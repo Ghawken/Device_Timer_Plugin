@@ -75,6 +75,12 @@ All numeric time values are reported in minutes with 1 decimal place.
   - target_device_id
   - target_device_name
   - target_on_state
+- Power usage tracking:
+  - using_power (String: "True", "False", or "Unknown") - Whether device is using power (>1W)
+  - powerused_24hours (Number, kWh) - Energy consumed in last 24 hours
+  - powerused_48hours (Number, kWh) - Energy consumed in last 48 hours
+
+Note: Power usage states require the target device to support energy metering (SupportsEnergyMeter and SupportsEnergyMeterCurPower). If the target device does not support these features, using_power will show "Unknown" and power usage values will be 0.
 
 Tip: Use the “Control Page Label” names from Devices.xml to drop these onto Control Pages, or use the text variants directly.
 

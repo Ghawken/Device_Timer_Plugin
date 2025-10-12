@@ -169,6 +169,21 @@
     <TriggerLabel>Off Time (Yesterday, text)</TriggerLabel>
     <ControlPageLabel>Off Time Yesterday (text)</ControlPageLabel>
 </State>
+<State id="using_power">
+    <ValueType>String</ValueType>
+    <TriggerLabel>Using Power</TriggerLabel>
+    <ControlPageLabel>Using Power</ControlPageLabel>
+</State>
+<State id="powerused_24hours">
+    <ValueType>Number</ValueType>
+    <TriggerLabel>Power Used (24h, kWh)</TriggerLabel>
+    <ControlPageLabel>Power Used (24h)</ControlPageLabel>
+</State>
+<State id="powerused_48hours">
+    <ValueType>Number</ValueType>
+    <TriggerLabel>Power Used (48h, kWh)</TriggerLabel>
+    <ControlPageLabel>Power Used (48h)</ControlPageLabel>
+</State>
         </States>
         <UiDisplayStateId>timeon_today_text</UiDisplayStateId>
     </Device>
