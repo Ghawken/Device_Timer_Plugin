@@ -464,6 +464,8 @@ class Plugin(indigo.PluginBase):
         Returns effective on/off state: either based on power (if enabled) or normal onState.
         Returns None if state cannot be determined.
         """
+        if not target_dev:  # ✅ ADD: Guard clause
+            return None
         if use_power:
             # Try to get power consumption
             try:
@@ -510,6 +512,7 @@ class Plugin(indigo.PluginBase):
                 "offsets": {},
                 "day_offsets": {"today": 0.0, "yesterday": 0.0},
                 "count_offsets": {"today": 0, "yesterday": 0},
+                "use_power_for_on_off": use_power,  # ✅ ADD: Missing field
                 "on_events": [],
             }
             return
@@ -519,7 +522,8 @@ class Plugin(indigo.PluginBase):
 
         target_dev = indigo.devices.get(target_id)
         if target_dev:
-            current_on = getattr(target_dev, "onState", None)
+            # ✅ Use effective state (power-based if enabled)
+            current_on = self._get_effective_on_state(target_dev, use_power)
             if current_on:
                 intervals.append((now, None))
                 self.logger.debug(f"Opened interval at startup for '{timer_dev.name}' (target ON)")
