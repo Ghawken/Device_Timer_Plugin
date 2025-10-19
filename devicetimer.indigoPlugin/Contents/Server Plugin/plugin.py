@@ -328,6 +328,7 @@ class Plugin(indigo.PluginBase):
     def deviceUpdated(self, orig_dev: indigo.Device, new_dev: indigo.Device) -> None:
         super().deviceUpdated(orig_dev, new_dev)
         now = indigo.server.getTime()
+
         timer_ids = self.by_target.get(new_dev.id, set())
         if not timer_ids:
             return
@@ -343,23 +344,16 @@ class Plugin(indigo.PluginBase):
                 if tracker:
                     self._update_power_states(timer_dev, tracker, new_dev, now)
 
-        use_power = tracker.get("use_power_for_on_off", False)
-        old_on = self._get_effective_on_state(orig_dev, use_power)
-        new_on = self._get_effective_on_state(new_dev, use_power)
+            use_power = tracker.get("use_power_for_on_off", False)
+            old_on = self._get_effective_on_state(orig_dev, use_power)
+            new_on = self._get_effective_on_state(new_dev, use_power)
 
-
-        if old_on is not None or new_on is not None:
-            if old_on != new_on:
-                self.logger.debug(f"Tracked device change: '{new_dev.name}' (id {new_dev.id}) onState {old_on} -> {new_on}")
+            if old_on is not None or new_on is not None:
+                if old_on != new_on:
+                    self.logger.debug(f"Tracked device change: '{new_dev.name}' (id {new_dev.id}) onState {old_on} -> {new_on}")
 
         # If device doesn't support on/off or no transition, stop here
-        if (old_on is None and new_on is None) or (old_on == new_on):
-            return
-
-        #now = indigo.server.getTime()
-        for timer_dev_id in list(timer_ids):
-            tracker = self.trackers.get(timer_dev_id)
-            if not tracker:
+            if (old_on is None and new_on is None) or (old_on == new_on):
                 continue
 
             intervals: List[Tuple[datetime, Optional[datetime]]] = tracker["intervals"]
