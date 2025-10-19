@@ -11,6 +11,12 @@
             <Field id="note" type="label" fontColor="darkgray" fontSize="small">
                 <Label>Tracks how many hours the selected device has been ON over rolling windows.</Label>
             </Field>
+            <Field id="usePowerForOnOff" type="checkbox" defaultValue="false">
+    <Label>Use Power usage to determine On/Off state:</Label>
+</Field>
+<Field id="note2" type="label" fontColor="darkgray" fontSize="small">
+    <Label>If checked: power &gt;5W = ON, ≤5W = OFF (if device reports power)</Label>
+</Field>
         </ConfigUI>
         <States>
                         <!-- Target metadata states -->

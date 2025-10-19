@@ -343,8 +343,9 @@ class Plugin(indigo.PluginBase):
                 if tracker:
                     self._update_power_states(timer_dev, tracker, new_dev, now)
 
-        old_on = getattr(orig_dev, "onState", None)
-        new_on = getattr(new_dev, "onState", None)
+        use_power = tracker.get("use_power_for_on_off", False)
+        old_on = self._get_effective_on_state(orig_dev, use_power)
+        new_on = self._get_effective_on_state(new_dev, use_power)
 
 
         if old_on is not None or new_on is not None:
@@ -355,7 +356,7 @@ class Plugin(indigo.PluginBase):
         if (old_on is None and new_on is None) or (old_on == new_on):
             return
 
-        now = indigo.server.getTime()
+        #now = indigo.server.getTime()
         for timer_dev_id in list(timer_ids):
             tracker = self.trackers.get(timer_dev_id)
             if not tracker:
@@ -446,8 +447,9 @@ class Plugin(indigo.PluginBase):
                     target_dev = indigo.devices.get(target_id) if target_id is not None else None
                     if target_dev:
                         self._update_target_meta_states(timer_dev, target_dev)
+                        use_power = tracker.get("use_power_for_on_off", False)
                         self._update_power_states(timer_dev, tracker, target_dev, now)
-                        current_on = getattr(target_dev, "onState", None)
+                        current_on = self._get_effective_on_state(target_dev, use_power)
                         if current_on and not (intervals and intervals[-1][1] is None):
                             intervals.append((now, None))
                             self.logger.debug(f"Opened interval for timer '{timer_dev.name}' due to target ON")
@@ -463,6 +465,22 @@ class Plugin(indigo.PluginBase):
             pass
 
     ########################################
+    def _get_effective_on_state(self, target_dev: indigo.Device, use_power: bool) -> Optional[bool]:
+        """
+        Returns effective on/off state: either based on power (if enabled) or normal onState.
+        Returns None if state cannot be determined.
+        """
+        if use_power:
+            # Try to get power consumption
+            try:
+                power = getattr(target_dev, "curEnergyLevel", None)
+                if power is not None:
+                    return float(power) > 5.0
+            except (ValueError, TypeError, AttributeError):
+                pass
+        # Fall back to normal onState
+        return getattr(target_dev, "onState", None)
+
     # Helpers
     # Function: _register_tracker (around L300-L370)
     # - Read current device states for today/yesterday minutes and counts into baselines at startup.
@@ -471,6 +489,7 @@ class Plugin(indigo.PluginBase):
 
         props = timer_dev.pluginProps or {}
         target_str = props.get("targetDeviceId", "")
+        use_power = bool(props.get("usePowerForOnOff", False))
         if not target_str:
             self.logger.warning(f"'{timer_dev.name}' has no target device selected.")
             self._update_target_meta_states(timer_dev, None)
@@ -482,6 +501,7 @@ class Plugin(indigo.PluginBase):
                 "count_offsets": {"today": 0, "yesterday": 0},
                 "on_events": [],
                 "yesterday_locked_for_date": indigo.server.getTime().date(),
+                "use_power_for_on_off": use_power,
             }
             return
 
