@@ -580,6 +580,20 @@ class Plugin(indigo.PluginBase):
         except Exception as exc:
             self.logger.exception(exc)
 
+        # ✅ NEW: Baselines for power usage (24h and 48h)
+        power_offsets = {"24hours": 0.0, "48hours": 0.0}
+        try:
+            p_24h = timer_dev.states.get("powerused_24hours", 0)
+            p_48h = timer_dev.states.get("powerused_48hours", 0)
+            power_offsets["24hours"] = float(p_24h) if p_24h is not None else 0.0
+            power_offsets["48hours"] = float(p_48h) if p_48h is not None else 0.0
+            self.logger.debug(
+                f"Captured power offsets for '{timer_dev.name}': 24h={power_offsets['24hours']:.3f} kWh, "
+                f"48h={power_offsets['48hours']:.3f} kWh"
+            )
+        except Exception as exc:
+            self.logger.exception(exc)
+
         self.trackers[timer_dev.id] = {
             "target_id": target_id,  # or None in the no-target branch
             "intervals": intervals,
@@ -589,6 +603,7 @@ class Plugin(indigo.PluginBase):
             "on_events": [],
             "yesterday_locked_for_date": indigo.server.getTime().date(),  # lock for the current date
             "energy_snapshots": [],  # List of (datetime, accumEnergyTotal) tuples
+            "power_offsets": power_offsets,  # ✅ ADD: Store power baseline
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
         self.logger.debug(f"Registered '{timer_dev.name}' -> target id {target_id} (intervals: {len(intervals)})")
@@ -820,7 +835,8 @@ class Plugin(indigo.PluginBase):
         using_power, cur_power, accum_energy = self._get_power_info(target_dev)
         
         kv = [{"key": "using_power", "value": using_power}]
-        
+        power_offsets = tracker.get("power_offsets", {"24hours": 0.0, "48hours": 0.0})
+
         # Store energy snapshot if we have valid data
         if accum_energy is not None:
             snapshots = tracker.setdefault("energy_snapshots", [])
@@ -831,7 +847,11 @@ class Plugin(indigo.PluginBase):
             # Calculate power used over 24h and 48h
             power_24h = self._calculate_power_used(snapshots, accum_energy, now, 24)
             power_48h = self._calculate_power_used(snapshots, accum_energy, now, 48)
-            
+
+            # ✅ ADD: Combine with baseline
+            total_24h = (power_24h or 0.0) + power_offsets["24hours"]
+            total_48h = (power_48h or 0.0) + power_offsets["48hours"]
+
             if power_24h is not None:
                 kv.append({"key": "powerused_24hours", "value": power_24h, "uiValue": f"{power_24h:.3f}", "decimalPlaces": 3})
             else:
