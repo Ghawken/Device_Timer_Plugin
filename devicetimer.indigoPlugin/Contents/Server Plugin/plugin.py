@@ -344,6 +344,12 @@ class Plugin(indigo.PluginBase):
                 if tracker:
                     self._update_power_states(timer_dev, tracker, new_dev, now)
 
+        # Process state transitions - SEPARATE LOOP
+        for timer_dev_id in list(timer_ids):
+            tracker = self.trackers.get(timer_dev_id)
+            if not tracker:
+                continue
+
             use_power = tracker.get("use_power_for_on_off", False)
             old_on = self._get_effective_on_state(orig_dev, use_power)
             new_on = self._get_effective_on_state(new_dev, use_power)
@@ -352,7 +358,7 @@ class Plugin(indigo.PluginBase):
                 if old_on != new_on:
                     self.logger.debug(f"Tracked device change: '{new_dev.name}' (id {new_dev.id}) onState {old_on} -> {new_on}")
 
-        # If device doesn't support on/off or no transition, stop here
+            # If device doesn't support on/off or no transition, stop here
             if (old_on is None and new_on is None) or (old_on == new_on):
                 continue
 
