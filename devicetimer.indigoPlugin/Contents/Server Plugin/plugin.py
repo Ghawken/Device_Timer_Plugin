@@ -490,7 +490,7 @@ class Plugin(indigo.PluginBase):
         if use_power:
             # Try to get power consumption
             try:
-                power = getattr(target_dev, "curEnergyLevel", None)
+                power = getattr(target_dev, "energyCurLevel", None)
                 if power is not None:
                     power_val = float(power)
                     is_on = power_val > 5.0
