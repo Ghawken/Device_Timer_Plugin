@@ -913,12 +913,12 @@ class Plugin(indigo.PluginBase):
             total_48h = (power_48h or 0.0) + power_offsets["48hours"]
 
             if power_24h is not None:
-                kv.append({"key": "powerused_24hours", "value": power_24h, "uiValue": f"{power_24h:.3f}", "decimalPlaces": 3})
+                kv.append({"key": "powerused_24hours", "value": total_24h, "uiValue": f"{total_24h:.3f}", "decimalPlaces": 3})
             else:
                 kv.append({"key": "powerused_24hours", "value": 0.0, "uiValue": "0.000", "decimalPlaces": 3})
             
             if power_48h is not None:
-                kv.append({"key": "powerused_48hours", "value": power_48h, "uiValue": f"{power_48h:.3f}", "decimalPlaces": 3})
+                kv.append({"key": "powerused_48hours", "value": total_48h, "uiValue": f"{total_48h:.3f}", "decimalPlaces": 3})
             else:
                 kv.append({"key": "powerused_48hours", "value": 0.0, "uiValue": "0.000", "decimalPlaces": 3})
         else:
