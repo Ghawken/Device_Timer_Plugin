@@ -558,7 +558,7 @@ class Plugin(indigo.PluginBase):
             current_on = self._get_effective_on_state(target_dev, use_power)
             if current_on:
                 intervals.append((now, None))
-                self.logger.info(
+                self.logger.debug(
                     f"Opened interval at startup for '{timer_dev.name}' "
                     f"(target '{target_dev.name}' is ON, use_power={use_power})"
                 )
