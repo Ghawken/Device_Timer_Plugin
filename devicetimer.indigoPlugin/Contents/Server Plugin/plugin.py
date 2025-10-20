@@ -493,13 +493,17 @@ class Plugin(indigo.PluginBase):
                 power = getattr(target_dev, "curEnergyLevel", None)
                 if power is not None:
                     power_val = float(power)
-                    self.logger.debug(f"Power check for '{target_dev.name}': {power_val}W, ON={power_val > 5.0}")
-                    return power_val > 5.0
+                    is_on = power_val > 5.0
+                    self.logger.debug(f"Power check for '{target_dev.name}': {power_val}W, ON={is_on}")
+                    return is_on
             except (ValueError, TypeError, AttributeError) as exc:
                 self.logger.debug(f"Could not read power from '{target_dev.name}': {exc}")
-                pass
-            # If power mode requested but not available, fall back to onState
-            self.logger.debug(f"Power mode for '{target_dev.name}' but no valid power state, falling back to onState")
+
+            # ✅ FIX: Log warning if power mode is enabled but data unavailable
+            self.logger.warning(
+                f"Power mode enabled for '{target_dev.name}' but power data unavailable. "
+                f"Consider disabling 'Use Power for On/Off' or ensure device reports curEnergyLevel."
+            )
 
         # Fall back to normal onState
         on_state = getattr(target_dev, "onState", None)
@@ -632,6 +636,7 @@ class Plugin(indigo.PluginBase):
             "on_events": [],
             "yesterday_locked_for_date": indigo.server.getTime().date(),  # lock for the current date
             "energy_snapshots": [],  # List of (datetime, accumEnergyTotal) tuples
+            "use_power_for_on_off": use_power,
             "power_offsets": power_offsets,  # ✅ ADD: Store power baseline
         }
         self.by_target.setdefault(target_id, set()).add(timer_dev.id)
