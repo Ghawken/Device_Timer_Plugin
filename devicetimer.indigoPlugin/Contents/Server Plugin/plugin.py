@@ -469,19 +469,28 @@ class Plugin(indigo.PluginBase):
         """
         Returns effective on/off state: either based on power (if enabled) or normal onState.
         Returns None if state cannot be determined.
+        Power-based: > 5W = ON, ≤ 5W = OFF
         """
-        if not target_dev:  # ✅ ADD: Guard clause
+        if not target_dev:
             return None
+
         if use_power:
             # Try to get power consumption
             try:
                 power = getattr(target_dev, "curEnergyLevel", None)
                 if power is not None:
-                    return float(power) > 5.0
-            except (ValueError, TypeError, AttributeError):
+                    power_val = float(power)
+                    self.logger.debug(f"Power check for '{target_dev.name}': {power_val}W, ON={power_val > 5.0}")
+                    return power_val > 5.0
+            except (ValueError, TypeError, AttributeError) as exc:
+                self.logger.debug(f"Could not read power from '{target_dev.name}': {exc}")
                 pass
+            # If power mode requested but not available, fall back to onState
+            self.logger.debug(f"Power mode for '{target_dev.name}' but no valid power state, falling back to onState")
+
         # Fall back to normal onState
-        return getattr(target_dev, "onState", None)
+        on_state = getattr(target_dev, "onState", None)
+        return on_state
 
     # Helpers
     # Function: _register_tracker (around L300-L370)
@@ -532,7 +541,14 @@ class Plugin(indigo.PluginBase):
             current_on = self._get_effective_on_state(target_dev, use_power)
             if current_on:
                 intervals.append((now, None))
-                self.logger.debug(f"Opened interval at startup for '{timer_dev.name}' (target ON)")
+                self.logger.info(
+                    f"Opened interval at startup for '{timer_dev.name}' "
+                    f"(target '{target_dev.name}' is ON, use_power={use_power})"
+                )
+            else:
+                self.logger.debug(
+                    f"Target '{target_dev.name}' is OFF at startup for '{timer_dev.name}'"
+                )
         else:
             self.logger.warning(f"'{timer_dev.name}' target device id {target_id} not found.")
 
@@ -736,6 +752,32 @@ class Plugin(indigo.PluginBase):
         offsets: Dict[str, float] = tracker.get("offsets", {})
         day_offsets: Dict[str, float] = tracker.get("day_offsets", {"today": 0.0, "yesterday": 0.0})
         count_offsets: Dict[str, int] = tracker.get("count_offsets", {"today": 0, "yesterday": 0})
+
+        # ✅ NEW: Validation - ensure intervals match target device state
+        target_id = tracker.get("target_id")
+        if target_id:
+            target_dev = indigo.devices.get(target_id)
+            if target_dev:
+                use_power = tracker.get("use_power_for_on_off", False)
+                target_on = self._get_effective_on_state(target_dev, use_power)
+
+                # Check if interval state matches target state
+                interval_open = intervals and intervals[-1][1] is None
+                if target_on and not interval_open:
+                    # Target is ON but no open interval
+                    self.logger.warning(
+                        f"'{timer_dev.name}' target '{target_dev.name}' is ON but no open interval. "
+                        f"Opening interval now."
+                    )
+                    intervals.append((now, None))
+                elif not target_on and interval_open:
+                    # Target is OFF but interval is open
+                    self.logger.warning(
+                        f"'{timer_dev.name}' target '{target_dev.name}' is OFF but interval is open. "
+                        f"Closing interval now."
+                    )
+                    start, _ = intervals[-1]
+                    intervals[-1] = (start, now)
 
         kv_list = []
 
