@@ -450,9 +450,22 @@ class Plugin(indigo.PluginBase):
                         use_power = tracker.get("use_power_for_on_off", False)
                         self._update_power_states(timer_dev, tracker, target_dev, now)
                         current_on = self._get_effective_on_state(target_dev, use_power)
-                        if current_on and not (intervals and intervals[-1][1] is None):
+                        interval_open = intervals and intervals[-1][1] is None
+
+                        if current_on and not interval_open:
+                            # Device is ON but no open interval
                             intervals.append((now, None))
-                            self.logger.debug(f"Opened interval for timer '{timer_dev.name}' due to target ON")
+                            self.logger.info(
+                                f"Opened interval for timer '{timer_dev.name}' (target '{target_dev.name}' is ON, mode={'power' if use_power else 'onState'})"
+                            )
+                        elif not current_on and interval_open:
+                            # Device is OFF but interval is open - close it
+                            start, _ = intervals[-1]
+                            duration_mins = (now - start).total_seconds() / 60.0
+                            intervals[-1] = (start, now)
+                            self.logger.info(
+                                f"Closed interval for timer '{timer_dev.name}' (target is OFF). Duration: {duration_mins:.1f} min"
+                            )
 
                     # Prune old energy snapshots
                     self._prune_energy_snapshots(tracker.setdefault("energy_snapshots", []), now)
